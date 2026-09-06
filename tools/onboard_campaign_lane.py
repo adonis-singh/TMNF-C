@@ -7,7 +7,7 @@
     promote  re-run pending replays against HEAD and promote exact ones
 
 Lanes share the repository. Commits are built with a private index and
-`git commit-tree`, so other agents' staged or unstaged work is never swept in
+`git commit-tree`, so unrelated staged or unstaged changes are excluded
 and no trailer hook runs. Every git write is serialized on the `git` lock and
 every build/asset write on the `shared` lock (see onboard_track.locked).
 """
@@ -51,8 +51,8 @@ QUEUE_HEADER = (
     "# Onboarding divergence queue\n\n"
     "Captured references whose native replay is not byte-exact. Each row is a\n"
     "registered `pending:` replay in `oracle/tracks/manifest.txt` with its\n"
-    "files under `oracle/results/pending/<id>/`. The physics fixer consumes\n"
-    "this queue; `tools/onboard_campaign_lane.py promote` re-runs every pending\n"
+    "files under `oracle/results/pending/<id>/`.\n"
+    "`tools/onboard_campaign_lane.py promote` re-runs every pending\n"
     "replay after a `src/` commit lands and moves exact ones back to\n"
     "`oracle/results/`.\n\n"
     "| Track | Capture | Exact prefix | First divergent field / word | "
@@ -131,7 +131,7 @@ def pull_rebase_if_clean() -> None:
         return
     dirty = git("status", "--porcelain", "--untracked-files=no").stdout.strip()
     if dirty:
-        print(f"origin/main is {behind} ahead but the tree has other agents' "
+        print(f"origin/main is {behind} ahead but the tree has "
               "modifications; committing locally without rebase", flush=True)
         return
     result = git("rebase", "origin/main", check=False)

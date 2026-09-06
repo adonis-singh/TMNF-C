@@ -587,7 +587,7 @@ def test_evaluate_counts_only_full_episodes_it_stepped() -> None:
         assert all(int(key) in TERMINATION_NAMES for key in result.termination_reason_counts)
         assert len(set(result.distances)) == 1, "greedy episodes are one trajectory"
         # Sampled evaluation: different trajectories, same result for the same
-        # seed, and the global Torch RNG streams come back untouched (F29).
+        # seed, and the global Torch RNG streams come back untouched.
         torch.manual_seed(123)
         cpu_before, cuda_before = torch.get_rng_state(), torch.cuda.get_rng_state(device)
         sampled = evaluate_full_start(agent, env, 8, device, sampled=True, sample_seed=7)
@@ -647,7 +647,7 @@ def _drive_schedule(track_id: str, inputs: bytes, *, analog: bool, ticks: int) -
     respawn_action = False
     if analog:
         records = [RECORD.unpack_from(inputs, i * RECORD.size) for i in range(ticks)]
-        # Word 16 is TMNFRaceInputs.respawn (analysis/respawn.md).
+        # Word 16 is TMNFRaceInputs.respawn.
         respawn_action = any(record[16] != 0 for record in records)
     env = TmnfVectorEnv(
         1, action_space="analog" if analog else "discrete", respawn_action=respawn_action, **kwargs
@@ -683,7 +683,7 @@ def _drive_schedule(track_id: str, inputs: bytes, *, analog: bool, ticks: int) -
 
 # Features that depend on the route reference: excluded for A08, whose
 # reference is the south out-and-back while the record loops the north road
-# 154 half-widths away (analysis/rl_env.md, Validation limits).
+# 154 half-widths away.
 _ROUTE_FEATURES = {"lateral", "half_width", "lateral_ratio"} | {
     name for name in encoder.FEATURE_NAMES if name.startswith("geo")
 }
@@ -695,10 +695,8 @@ SCALE_BOUND = 3.2  # asinh(59 m / 5 m) = 3.16: the A01 policy lap 59 m beside th
 def test_encoder_features_stay_within_scale_on_record_lines() -> None:
     """Every flat feature stays within about 3 in magnitude on the seven
     world-record replays (E04's with its respawn) and the exported A01/B05
-    policy laps. Before the
-    scales were fixed the 5 m lookahead slot read x/d up to 8.7 (review,
-    finding 11); the wall-ride and open-surface widths on E01 (256 m), the
-    181 m/s record speed and the A01 policy lap's 59 m excursion set them."""
+    policy laps. Coverage includes E01's wall ride, open-surface widths and
+    181 m/s record speed, plus the A01 policy's 59 m lateral excursion."""
     manifest = [
         line.split("|")
         for line in (ROOT / "oracle" / "results" / "wr" / "manifest.txt").read_text().splitlines()
@@ -739,7 +737,7 @@ def test_encoder_features_stay_within_scale_on_record_lines() -> None:
 def test_encoder_ignores_position_clock_and_progress() -> None:
     """World position, arc length, unwrapped progress, remaining distance,
     the race clock, the checkpoint fraction and the lap fraction (obs 0-2,
-    38, 39, 42-45) must not reach the network (review, finding 5)."""
+    38, 39, 42-45) must not reach the network."""
     env = TmnfVectorEnv(4, thread_count=1, action_repeat=5)
     try:
         env.reset()
@@ -910,7 +908,7 @@ SNAPSHOT_START_FLAGS = [
 
 
 def test_snapshot_start_runs_are_bit_reproducible_resume_and_never_touch_eval(tmp_path: Path) -> None:
-    """Attacks on snapshot starts (F9): (1) two same-seed runs must match every
+    """Attacks on snapshot starts: (1) two same-seed runs must match every
     cell although half the resets restore pool states; (2) a resume must
     continue them bit-exactly (pool, candidates and in-flight captures are
     checkpointed); (3) the evaluation environment is never restored and every
@@ -1349,7 +1347,7 @@ def test_resume_is_bit_exact_and_guarded(trained_run: tuple[Path, str], tmp_path
         cwd=ROOT, env=ENV, capture_output=True, text=True,
     )
     assert result.returncode != 0 and "config differs from the checkpoint" in result.stderr
-    # Guard (F25): python/tmnf_rl changed since the run started.
+    # Guard: python/tmnf_rl changed since the run started.
     finished["code_sha256"] = finished["code_sha256_current"] = "d" * 64
     write_json_atomic(run_path, finished)
     result = subprocess.run(
@@ -1530,7 +1528,7 @@ def test_tracks_catalogue_matches_manifest() -> None:
 def require_fixtures(track_id: str) -> None:
     """Skip visibly (pytest -rs) when a manifest track's files are not in this
     tree; the gate runs from a worktree of HEAD, so an onboarded-but-uncommitted
-    track (F32) shows up here as a skip, never as a pass."""
+    track shows up here as a skip, never as a pass."""
     missing = track_catalogue()[track_id].missing_fixtures(ROOT)
     if missing:
         pytest.skip(f"{track_id}: fixtures not in this tree: {[p.name for p in missing]}")
@@ -1712,7 +1710,7 @@ def test_cuda_env_training_mirrors_the_cpu_trainer_and_reproduces(tmp_path: Path
 
 
 
-# ------------------------------------------------------- Phase 6 exploration
+# ------------------------------------------------------- Exploration options
 
 
 def test_landing_novelty_and_pedal_hold_units() -> None:
@@ -1798,7 +1796,7 @@ def test_landing_novelty_and_pedal_hold_units() -> None:
 
 
 def test_exploration_arms_train_reproduce_resume_and_change_the_run(tmp_path: Path) -> None:
-    """Each Phase 6 arm (landing novelty, pedal hold, entropy boost, EMA +
+    """Each exploration option (landing novelty, pedal hold, entropy boost, EMA +
     lr decay) runs on the analog head, differs from the plain run once it
     has anything to act on, and the
     combined arms reproduce bit-exactly and resume bit-exactly (their state is

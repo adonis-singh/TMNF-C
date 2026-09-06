@@ -113,8 +113,7 @@ void World_AdvanceTimer(TmnfWorld *world, uint32_t tick_ms);
  * the seeded yaw jitter (the seed is zero for a player respawn): the car is
  * reset (0x007C0320 CSceneVehicleCar::VehicleReset), its rigid body is
  * zeroed (0x0053D340 CHmsItem::ResetDynamicState) and placed at `spawn`
- * (0x007B2E00 CSceneMobil::SetLocation). The race timer keeps running. See
- * analysis/respawn.md.
+ * (0x007B2E00 CSceneMobil::SetLocation). The race timer keeps running.
  */
 TMNF_HD void World_Respawn(TmnfWorld *world, const GmIso4 *spawn);
 

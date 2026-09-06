@@ -74,8 +74,7 @@ typedef struct TmnfPhysicsWorld {
 	 * finish corpora, static-tree members whose contact sink (0x0047CBA0
 	 * CTrackManiaRaceTriggerAbsorbContact::AbsorbContact) fires from
 	 * ComputeCollisionResponse on the contacts each detection pass found
-	 * against the car's predicted iso (analysis/game_rules.md, "Trigger
-	 * timing"). Every detection pass of the player corpus ORs
+	 * against the car's predicted iso. Every detection pass of the player corpus ORs
 	 * TmnfRace_TriggerContactMask into trigger_contacts; PhysicsStep2 clears
 	 * it first. NULL: no triggers (physics-only worlds). A link source
 	 * (TmnfWorldLinkSources.route). */

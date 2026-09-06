@@ -58,7 +58,7 @@ def write_json_atomic(path: Path, payload: Any) -> None:
         temporary.replace(path)
     except BaseException:
         # A failed write (disk full, quota) must not leave a partial temp file
-        # next to the target (F27); the target itself is untouched.
+        # next to the target; the target itself is untouched.
         temporary.unlink(missing_ok=True)
         raise
 
@@ -74,7 +74,7 @@ def enforce_cpu_affinity() -> list[int]:
         raise RuntimeError(
             "process affinity includes reserved CPUs "
             f"{sorted(allowed & RESERVED_CPUS)}; start with "
-            "taskset -c 0-13,16-29"
+            "taskset using CPU IDs outside TMNF_RESERVED_CPUS"
         )
     return sorted(allowed)
 
@@ -83,7 +83,7 @@ def require_single_gpu_env() -> str:
     """``CUDA_VISIBLE_DEVICES`` must name exactly one GPU index.
 
     The trainer never picks a GPU itself: the operator says which physical
-    card a run may use (GPU 0, the RTX 5090, for the phase 1 runs) and the
+    card a run may use, and the
     card's name goes into provenance, where ``reproduce`` compares it.
     """
     visible = os.environ.get("CUDA_VISIBLE_DEVICES")

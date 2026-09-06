@@ -97,7 +97,7 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
                 f"run {args.run_id!r} was resumed across a python/tmnf_rl change at "
                 f"update {first_change} ({code_changes}); only its first {first_change} "
                 "updates were produced by its code_sha256, so at most "
-                f"--updates {first_change} can be reproduced from it (F25)"
+                f"--updates {first_change} can be reproduced from it"
             )
 
     physics_library = Path(original_args["physics_library"])
@@ -112,7 +112,7 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         )
     # Pin the numerics the same way the trainer does, then compare the pinned
     # state and the torch/CUDA/cuDNN/GPU identity with the original's record;
-    # a mismatch is named, not discovered as an unexplained metric diff (F24).
+    # a mismatch is named, not discovered as an unexplained metric diff.
     select_device()
     current_provenance = provenance.collect(
         physics_library, seed=int(original_args["seed"]), root=root, torch_module=torch

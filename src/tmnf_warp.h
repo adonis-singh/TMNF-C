@@ -1,4 +1,4 @@
-/* Warp cooperation for the device build (docs/CUDA.md, "Phase 2").
+/* Warp cooperation for the device build.
  *
  * The physics of one environment runs on one thread. Where the work per
  * environment varies a lot between the lanes of a warp (the collision

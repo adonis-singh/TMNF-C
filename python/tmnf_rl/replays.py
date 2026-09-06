@@ -44,7 +44,7 @@ def export_scene(
     byte-exact against the game captures. Its finish time is returned as
     ``finish_ms`` (None when that path does not finish) next to the vec-env's
     ``expected_finish_ms``; since native d09dc00 the two must agree and a
-    mismatch is a physics regression (docs/RL_PLATFORM.md, F2). A
+    mismatch is a physics regression. A
     non-finishing World replay is recorded, not raised: the run must survive it.
     """
     root = (root or project_root()).resolve()

@@ -431,9 +431,9 @@ SHIMS = ONBOARDING / "shims.json"
 def sync_tree() -> str:
     """Check the committed HEAD out into the private build worktree.
 
-    Harness sources under tools/ and tests/ that HEAD's CMake references but
-    other agents keep uncommitted are copied in as shims; src/ is always the
-    committed physics.
+    Locally available harness sources under tools/ and tests/ that HEAD's
+    CMake references are copied in as shims when missing from the worktree.
+    Physics sources always come from the committed revision.
     """
     head = git("rev-parse", "HEAD")
     shims = json.loads(SHIMS.read_text()) if SHIMS.exists() else []
@@ -459,9 +459,9 @@ def sync_tree() -> str:
         print(f"shimmed uncommitted harness sources: {', '.join(shims)}", flush=True)
     link = TREE / "oracle/wineprefix"
     if not link.exists() and not link.is_symlink():
-        # Only TmForever.exe is read from here (inverse_trig_native test).
+        # Share the local game installation with the build worktree.
         link.symlink_to(MAIN_PREFIX)
-    # tests/CMakeLists.txt requires the tools venv under third_party/.
+    # Share capture-tool dependencies with the build worktree.
     link = TREE / "third_party"
     if not link.is_symlink():
         link.symlink_to(ROOT / "third_party")

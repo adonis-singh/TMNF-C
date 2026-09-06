@@ -1,2 +1,2 @@
-/* Device compilation unit for src/vehicle_contact.c (see docs/CUDA.md). */
+/* Device compilation unit for src/vehicle_contact.c. */
 #include "../../vehicle_contact.c"

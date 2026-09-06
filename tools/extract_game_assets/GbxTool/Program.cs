@@ -55,7 +55,7 @@ switch (args[0])
         break;
     case "surface-materials":
         // Physical material ids of every *.Surface.Gbx under a directory,
-        // one JSON object per file (analysis/materials.md).
+        // one JSON object per file.
         WriteSurfaceMaterials(args[1], args[2]);
         break;
     case "material-ids":

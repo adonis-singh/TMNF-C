@@ -2,7 +2,7 @@
 
 Use a legitimate TrackMania Forever installation. This repository does not
 supply game executables, packs, extracted geometry, vehicle snapshots,
-textures or captured game memory. No account or license bypass is provided.
+textures or captured game memory.
 
 ## Physics image
 
@@ -34,7 +34,7 @@ cmake --build build -j4
 A source-only library refuses to create a game world. It does not silently
 use a blank image. Rebuilding is required after preparing the local image.
 Libraries built with this image contain derived game data; do not upload them
-as project releases without a separate redistribution review.
+unless you have the necessary redistribution rights.
 
 ## Track, vehicle and route snapshots
 
@@ -82,12 +82,9 @@ and builds route guidance. It writes a local catalogue under `oracle/tracks/`
 and keeps captures, caches and viewer outputs in ignored directories.
 A reported divergence is a failed comparison, not a successful fidelity check.
 
-This remains a research setup, not a one-command installer. The standalone
-source build and physics-image extraction have separate validation from
-capture-lane setup. A04 import has been checked from an existing configured
-lane with no saved vehicle fixture; initial setup on a clean machine has
-not been validated end to end. Do not infer clean-machine capture support from
-a passing synthetic test suite.
+A04 import has been tested using an existing configured lane with no saved
+vehicle fixture. Initial capture setup on a clean machine has not yet been
+validated end to end.
 
 ## Offline geometry and visuals
 

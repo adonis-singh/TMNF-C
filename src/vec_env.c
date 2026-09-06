@@ -1,6 +1,6 @@
 /* The RL layer (observation, reward, termination, autoreset, action
- * decoding, capture/restore) is mirrored by hand in src/cuda/tmnf_cuda_env.cu
- * (docs/CUDA.md, "vec_env mirror"). Any change here must be made there too;
+ * decoding, capture/restore) is mirrored by hand in src/cuda/tmnf_cuda_env.cu. Any
+ * change here must be made there too;
  * tests/cuda_lockstep.c compares every result and snapshot byte. */
 #define _GNU_SOURCE
 
@@ -1248,8 +1248,7 @@ static TmnfTerminationReason failure_reason(
 	 * outside the corridor where TmnfRace_Step freezes progress) is as
 	 * stuck as one standing still. No committed game capture holds
 	 * |delta| <= 1 mm for more than a handful of ticks inside the
-	 * corridor, airborne phases included (analysis/rl_env.md,
-	 * tools/wr_passthrough.c). */
+	 * corridor, airborne phases included. */
 	float delta = fabsf(
 		race->unwrapped_progress - race->previous_progress);
 	if (delta <= env->config.stuck_progress_epsilon)
@@ -1303,7 +1302,7 @@ static TmnfTerminationReason failure_reason(
  *
  * Two earlier forms failed. Zeroing the terminal potential on failure made
  * G_fail = -phi(s_0) - 0.01 (1 - gamma^Tmax) / (1 - gamma), one constant
- * for every non-finishing episode (docs/RL_PLATFORM.md F33). Keeping
+ * for every non-finishing episode. Keeping
  * phi(s_T) undeferred, G_fail = gamma^T phi(s_T) - ..., paid (1 - gamma^dT)
  * |phi(s_T)| for failing dT ticks later at the same progress, up to
  * |phi(s_0)| (1 - gamma^Tmax) (B05 19.5): on B05 a car surviving the 7,444

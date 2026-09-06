@@ -1,32 +1,20 @@
-# Source distribution boundary
+# Source and local data
 
-This repository has clean source history. Private research data and the old
-Git history are preserved locally under ignored `local/archive/`, not in a
-second active repository. They must never be committed or pushed here.
+The repository contains simulator code, Python bindings, training and capture
+tools, synthetic tests, and a viewer. Original project code uses the
+[MIT license](../LICENSE). Bundled libraries and fonts retain their
+[upstream licenses](../THIRD_PARTY_NOTICES.md).
 
-The source contains simulator code, bindings, training tools, capture and
-local asset-generation tools, synthetic tests and viewer code. Third-party
-viewer libraries and fonts retain their own licenses. Original project code is MIT-licensed; this does not license game assets.
+Game executables, packs, geometry, textures, vehicle and route snapshots,
+captures, replays, policy weights, and generated scenes are not included.
+See [local asset setup](LOCAL_ASSETS.md) to generate the data needed for
+simulation from your installed game.
 
-Game packs, executables, raw and converted geometry, vehicle and route
-snapshots, image data, captures, replays, model weights and generated scenes
-are excluded. Results in the README are reported research results, not a
-publicly downloadable verification bundle. Sharing policy artifacts or
-captures later needs a separate contents and provenance review.
+The physics image is extracted locally and embedded during compilation.
+A library built with `TMNF_GAME_MASK` therefore contains derived game data;
+the project's source license does not grant redistribution rights to that data.
+Generated data and build outputs belong in the ignored local directories.
 
-The physics bump-mask image used to be embedded in a source header. It is now
-extracted locally and validated before compilation. Consequently, a library
-compiled with local assets is not the same distribution as the source-only
-library. Do not publish asset-bearing build directories or CI artifacts.
-
-`tools/audit_public_tree.py` checks the tracked-file inventory for excluded
-paths, binary game formats, unexpected binary files and the embedded image's
-known byte sequence. CI runs this alongside the asset-free build. It is a
-packaging check, not a determination of legal rights in reconstructed code.
-Source licensing grants only rights the licensors actually hold.
-
-Before changing repository visibility, replace or remove every branch and tag
-that retains the private history, and inspect releases, workflow artifacts,
-attachments and other hosted copies. Deleting a file in a new commit is not
-history removal. GitHub can retain cached or other references after a force
-push; a new repository is preferable when a clean boundary cannot be confirmed.
+Run `python3 tools/audit_public_tree.py` to check tracked files for excluded
+paths, game formats, unexpected binaries, and embedded physics-image bytes.
+CI runs this check alongside the build that requires no game data.

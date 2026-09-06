@@ -1,2 +1,2 @@
-/* Device compilation unit for src/vehicle_compute.c (see docs/CUDA.md). */
+/* Device compilation unit for src/vehicle_compute.c. */
 #include "../../vehicle_compute.c"

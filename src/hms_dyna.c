@@ -10,7 +10,7 @@
 
 #include <stdlib.h>
 
-/* FP constants (raw float32 bit patterns from analysis/fp_constants.csv). */
+/* FP constants preserving the original float32 values. */
 #define DAT_00cdb690 9.999999439624929e-11f  /* ~1e-10 magnitude epsilon */
 #define DAT_00cdb67c 0.009999999776482582f   /* 0.01, max replacement/step */
 

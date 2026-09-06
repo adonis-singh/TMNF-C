@@ -1,4 +1,4 @@
-/* Device compilation unit for src/collision.c (see docs/CUDA.md). */
+/* Device compilation unit for src/collision.c. */
 #include "../../collision.c"
 #include "../../tmnf_warp.h"
 

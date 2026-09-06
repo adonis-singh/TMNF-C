@@ -1,4 +1,4 @@
-"""90-second PPO learning smoke test (see analysis/training_bisect.md).
+"""90-second PPO learning smoke test.
 
 Runs the start-only seed-1 configuration as a registered run on the GPU named
 by ``CUDA_VISIBLE_DEVICES`` with the reserved CPU set, then requires the trailing 100-episode distance

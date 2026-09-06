@@ -639,7 +639,7 @@ static void test_corridor_freezes_progress(void)
 }
 
 /* TMNF counts checkpoints in any order, once per lap; the finish counts
- * only after every checkpoint. The record replays (analysis/game_rules.md)
+ * only after every checkpoint. The record replays
  * all match the ghost order, so the game's count-based rule was verified on
  * the A08 finish-before-checkpoint case: the start/finish contact at 1.16 s
  * is ignored because the lap's checkpoint has not been taken. */
@@ -1520,8 +1520,7 @@ static void require_failure_episode(
 }
 
 /*
- * Reward identities on A01 (docs: analysis/rl_env.md, src/vec_env.c
- * tick_reward). One race budget for the finish and two failures, so the
+ * Reward identities on A01. One race budget for the finish and two failures, so the
  * time constant c = 0.01 (1 - gamma^Tmax) / (1 - gamma) is shared:
  *   finish (committed policy lap, 2,527 ticks) = -phi(s_0) - 0.01 (1 - gamma^T) / (1 - gamma)
  *   failures (coast, full gas)                 = gamma^Tmax phi(s_T) - phi(s_0) - c

@@ -1,21 +1,9 @@
 """Fixed physical-scale observation encoder for the 81-float policy observation.
 
-Every feature is a raw observation column divided by a constant taken from the
-physics (speed, damper travel, RPM limit, lookahead arc distance) or a
-categorical turned into a one-hot / embedding index. There are no running
-statistics: two runs with different early trajectories encode identically, a
-degenerate first batch cannot poison the scale (the b5b26b7 regression in
-analysis/training_bisect.md), and the running-normalizer collapse of the
-`ladder5090_mlp_*` pilots (analysis/nn_design_review.md, finding 1) cannot
-recur.
-
-The encoder feeds the network nothing that pins the car to a place on the
-track: world position (obs 0-2), world yaw, the race clock
-(`elapsed_fraction`, obs 43), the remaining-distance fraction (obs 42), the
-checkpoint fraction (obs 44) and the lap fraction (obs 45) are read by the
-trainer for bookkeeping only. The review found the pilot tokenizer leaking the
-clock and the progress fractions, which on a deterministic single-start track
-identify the position on the route (finding 5); they are gone here.
+Features use fixed physical scales and categorical encodings, without running
+statistics. The base observation excludes absolute position, race clock and
+route progress from actor features. The critic also receives remaining distance;
+encoder version 3 adds gate geometry and remaining checkpoint/lap counts.
 
 Column layout of the flat observation (src/vec_env.c flatten_observation):
   0-2   world position          3-6   quaternion (x, y, z, w)
@@ -33,18 +21,9 @@ Column layout of the flat observation (src/vec_env.c flatten_observation):
 Car frame: +z forward, +y up, +x right (the 5 m lookahead from the A01 start is
 (0, 0.45, 4.98) and R(q)^T v_world puts the whole speed on z).
 
-Scales were chosen so that no feature exceeds 3 in magnitude on the six
-world-record replays and the exported A01/B05 policy laps
-(`test_encoder_features_stay_within_scale_on_record_lines`; the per-feature
-maxima are tabulated in docs/RL_PLATFORM.md). Bounded quantities (speeds,
-damper, rpm) are divided by a constant. Heavy-tailed geometric ones (car-frame
-centerline positions, lateral offset, widths, angular velocity) are divided by
-the pilot tokenizer's constant and passed through asinh: slope 1 around zero,
-so a 3 m rise 5 m ahead still reads 0.56 as it did for the pilot winner, and
-logarithmic beyond, so the 46 m excursions that read 8.7 for the pilot read
-2.9. A plain division that bounds the tail at 3 (the first phase 1 launch
-divided near positions by 25 m) cut the near-geometry resolution five-fold
-and every run lost the A01 ramp within 150 updates (docs/RL_PLATFORM.md F36).
+Bounded quantities (speeds, damper travel, RPM) are divided by constants.
+Heavy-tailed geometry and angular velocity use asinh after scaling: this
+preserves resolution near zero while compressing large excursions.
 """
 
 from __future__ import annotations
@@ -64,10 +43,8 @@ WIDTH_SCALE = 10.0  # metres, asinh; the A01 policy lap flies 59 m beside the ce
 # open sections); the policy gains nothing from telling 60 m from 256 m.
 HALF_WIDTH_CAP = 60.0
 LATERAL_RATIO_MAX = 3.0
-# Lookahead positions are divided by the slot distance (the pilot's choice,
-# which keeps the 5 m slot at full resolution) and compressed with asinh, so
-# the 5 m slot that read x/d = 8.7 for the pilot while the car sat 46 m beside
-# the centerline (review, finding 11) reads 2.9.
+# Lookahead positions use the slot distance as their scale, then asinh
+# compresses large offsets while preserving nearby geometry detail.
 GEO_FAR_SCALE = 150.0
 MATERIAL_CLASSES = 18  # 0..16 observed, 17 = out of range
 # src/surface_material.h: physical IDs 0..30, plus an unknown category.
@@ -156,13 +133,9 @@ def feature_names(version: int = 1) -> tuple[str, ...]:
 # perturbs them and asserts the features are unchanged.
 EXCLUDED_COLUMNS = (0, 1, 2, 38, 39, 42, 43, 44, 45)
 
-# The critic alone also reads the remaining distance (obs 42). The reward is
-# potential-shaped with phi(s) = -remaining / 50 m/s, so the shaped return
-# from s is -phi(s) plus the tick costs and the terminal terms
-# (analysis/rl_env.md): a critic without remaining distance cannot fit it.
-# Measured on A01 (phase 1, first launch): explained variance 0.25-0.34 at
-# updates 50-100 without it, 0.85-0.93 with it in every earlier run. The
-# policy head never sees it, so the actor stays free of route coordinates.
+# The critic also reads remaining distance (obs 42). With potential shaping
+# phi(s) = -remaining / 50 m/s, the return includes -phi(s), tick costs and
+# terminal terms. Actor features exclude this route coordinate.
 CRITIC_FEATURES = 1
 REMAINING_SCALE = 2500.0  # metres; A01 0.88, B05 0.74, E01 2.28, A08 (3 laps) 2.17
 CRITIC_COLUMNS = (42,)

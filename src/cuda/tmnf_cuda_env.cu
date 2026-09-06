@@ -1,4 +1,4 @@
-/* CUDA vectorised environment. See tmnf_cuda_env.h and docs/CUDA.md.
+/* CUDA vectorised environment. See tmnf_cuda_env.h.
  *
  * The per-environment RL logic below mirrors src/vec_env.c function for
  * function (capture_physics, restore_physics, write_rl_observation,

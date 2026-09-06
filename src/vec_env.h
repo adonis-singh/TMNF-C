@@ -295,7 +295,7 @@ void TmnfVecEnv_Reset(
  * Actions are [longitudinal * 3 + steering]: longitudinal is coast, gas,
  * brake, or gas+brake; steering is left, neutral, or right. With
  * config.respawn_action, TMNF_DISCRETE_RESPAWN_FLAG on the byte respawns the
- * car on the first repeated tick (analysis/respawn.md). One call holds the
+ * car on the first repeated tick. One call holds the
  * action for action_repeat canonical 10 ms physics ticks. Reward is discounted
  * across repeated ticks and transition_discount is gamma^executed_ticks; use
  * that value for the transition's bootstrap term.

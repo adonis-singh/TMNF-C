@@ -1,2 +1,2 @@
-/* Device compilation unit for src/fastbuffer.c (see docs/CUDA.md). */
+/* Device compilation unit for src/fastbuffer.c. */
 #include "../../fastbuffer.c"

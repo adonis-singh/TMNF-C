@@ -18,7 +18,7 @@ from tmnf_rl.tracks import project_root, track_spec
 ACTION_COUNT = 12
 # respawn_action=True doubles the discrete set: action a + 12 is action a with
 # the Enter press on the first tick of the repeat (native byte a | 0x80). The
-# default set is unchanged (analysis/respawn.md).
+# default set is unchanged.
 RESPAWN_FLAG = 0x80
 OBSERVATION_VERSION = 2
 OBSERVATION_SIZE = 324

@@ -562,8 +562,8 @@ def seed_everything(seed: int) -> np.random.Generator:
 # deterministic algorithms are on. :4096:8 is the documented choice.
 CUBLAS_WORKSPACE_CONFIG = ":4096:8"
 # Environment variables that silently change CUDA float32 numerics. A trainer
-# refuses to start when one of them would override what pin_cuda_numerics sets
-# (F24): the same seed then produces different metrics with no record of why.
+# refuses to start when one of them would override what pin_cuda_numerics sets: the same
+# seed then produces different metrics with no record of why.
 NUMERICS_OVERRIDE_VARIABLES = ("TORCH_ALLOW_TF32_CUBLAS_OVERRIDE", "NVIDIA_TF32_OVERRIDE")
 
 
@@ -726,7 +726,7 @@ class PPOTrainer:
             raise ValueError(
                 "the evaluation environment must be a separate instance: training "
                 "restores snapshot starts into its environments and a full-start lap "
-                "may only come from a never-restored one (F9)"
+                "may only come from a never-restored one"
             )
         self.eval_env = eval_env
         # CUDA training env: the policy reads the env's device buffers and
@@ -1149,7 +1149,7 @@ class PPOTrainer:
 
     def _evaluate(self, scheduled_minutes: float) -> dict[str, Any]:
         # Greedy: one round of the eval environments is the whole trajectory
-        # set (F29); more episodes would be the same trajectory again.
+        # set; more episodes would be the same trajectory again.
         greedy = evaluate_full_start(
             self.policy_agent, self.eval_env, self.eval_env.num_envs, self.device,
             pedal_hold_decisions=self.config.pedal_hold_decisions,
@@ -1745,7 +1745,7 @@ class PPOTrainer:
             "eval_fullstart": (
                 {
                     "scheduled_minutes": latest["scheduled_minutes"],
-                    # Greedy trajectory: finished is the whole answer (F29).
+                    # Greedy trajectory: finished is the whole answer.
                     "finished": bool(latest["eval_fullstart/finished"]),
                     "median_lap_ms": latest["eval_fullstart/median_lap_ms"],
                     "best_lap_ms": latest["eval_fullstart/best_lap_ms"],

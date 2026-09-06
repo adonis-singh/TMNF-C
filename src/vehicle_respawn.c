@@ -129,7 +129,7 @@ TMNF_HD static void dyna_set_location(CHmsDyna *dyna, const GmIso4 *spawn)
 /* 0x007C0320 CSceneVehicleCar::VehicleReset and its base 0x007CB6B0
  * CSceneVehicle::VehicleReset, restricted to the state the port simulates.
  * Every store below is one of the game's; the offsets are the CSceneVehicleCar
- * words (analysis/respawn.md lists the ones with no native counterpart). */
+ * words. */
 TMNF_HD static void vehicle_reset(TmnfPhysicsCorpus *corpus)
 {
 	const GmIso4 identity = {

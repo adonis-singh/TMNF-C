@@ -1,4 +1,4 @@
-"""Source-only regression checks for the publication boundary."""
+"""Tests for local asset validation and empty track catalogues."""
 import importlib.util
 from pathlib import Path
 import subprocess

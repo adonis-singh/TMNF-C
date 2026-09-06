@@ -1,4 +1,4 @@
-/* In-race respawn of the player car (analysis/respawn.md).
+/* In-race respawn of the player car.
  *
  * 0x0047BF00 CTrackManiaRace::RespawnPlayerVehicle, reached from the Enter
  * press through 0x0047DCD0 CTrackManiaRace::OnInputEvent -> 0x00472700

@@ -1,2 +1,2 @@
-/* Device compilation unit for src/race.c (see docs/CUDA.md). */
+/* Device compilation unit for src/race.c. */
 #include "../../race.c"

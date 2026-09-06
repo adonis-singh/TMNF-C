@@ -59,7 +59,7 @@ def default_runs_root() -> Path:
 
 
 def infer_trainer(command_line: list[str]) -> str:
-    """Name the trainer of a run.json written before the `trainer` field (F26).
+    """Name the trainer of a run.json written before the `trainer` field.
 
     Our own runs recorded `python/tmnf_rl/train.py` (what `-m tmnf_rl.train`
     puts in argv[0]) or the thin `python/train_ppo.py` CLI; anything else is
@@ -75,7 +75,7 @@ def infer_trainer(command_line: list[str]) -> str:
 
 def pid_start_ticks(pid: int) -> int | None:
     """Field 22 of /proc/<pid>/stat: process start time in clock ticks since
-    boot. With the pid it identifies a process even after pid reuse (F28)."""
+    boot. With the pid it identifies a process even after pid reuse."""
     try:
         stat = Path(f"/proc/{pid}/stat").read_text()
     except OSError:
@@ -180,7 +180,7 @@ class RunLock:
     Held from before environment creation until the process exits; the kernel
     drops it when the holder dies (SIGKILL included), so there is no stale
     lock to clean up. A second trainer on the same run fails fast with the
-    holder's pid instead of interleaving writes (F23).
+    holder's pid instead of interleaving writes.
     """
 
     def __init__(self, run_dir: Path) -> None:
@@ -307,7 +307,7 @@ class RunRegistry:
             return False
         age = (now - parse_iso(payload["heartbeat_at"])).total_seconds()
         # A heartbeat in the future is a clock jump, not a live run; it is as
-        # suspicious as a stale one and goes on to the pid check (F28).
+        # suspicious as a stale one and goes on to the pid check.
         if 0.0 <= age < STALE_HEARTBEAT_SECONDS:
             return False
         if payload.get("hostname") != platform.node():
@@ -325,7 +325,7 @@ class RunRegistry:
         return True
 
     def mark_failed(self, run_id: str, *, reason: str, force: bool) -> dict[str, Any]:
-        """Operator override for a run parked in `running` (F28).
+        """Operator override for a run parked in `running`.
 
         Without ``force`` the run must look dead from here: stale heartbeat
         and no live process on this host. ``force`` skips that check for the
@@ -374,7 +374,7 @@ class RunRegistry:
                         if self._reap_if_dead(payload, now):
                             write_json_atomic(path, payload)
                         if "trainer" not in payload:
-                            # Foreign writers (F26) predate the field; name the
+                            # Foreign writers predate the field; name the
                             # entry point they recorded so the index shows what
                             # produced the run instead of an empty column.
                             command = (payload.get("provenance") or {}).get("command_line") or []
@@ -504,7 +504,7 @@ def new_run_payload(
         "code_sha256": provenance["code_sha256"],
         # The hash producing the newest rows; differs from code_sha256 only
         # after a --resume --ignore-code-hash, which also appends to
-        # code_changes (F25).
+        # code_changes.
         "code_sha256_current": provenance["code_sha256"],
         "code_changes": [],
         "seed": seed,
@@ -514,7 +514,7 @@ def new_run_payload(
         # Which program wrote this record: foreign trainers (the NN ladder's
         # ppo_pilot.py) share the format with different args, metrics, GPU and
         # physics, and the index shows this column so they are never read as
-        # tmnf_rl.train runs (F26).
+        # tmnf_rl.train runs.
         "trainer": trainer,
         "pid": os.getpid(),
         "pid_start_ticks": pid_start_ticks(os.getpid()),

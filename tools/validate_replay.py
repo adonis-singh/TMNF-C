@@ -8,8 +8,7 @@ track snapshot by challenge UID, re-simulates the ghost's inputs with the
 engine and compares the recorded finish time, checkpoint times and the sampled
 ghost trajectory against the simulation. Prints one summary line and exits
 0 (valid), 1 (invalid or scripted) or 2 (tooling error: undecodable replay,
-unregistered track, unsupported inputs). Respawns are simulated
-(analysis/respawn.md). See docs/VALIDATOR.md.
+unregistered track, unsupported inputs). Respawns are simulated.
 
     validate_replay.py --rebuild-uid-table [--campaign-dir DIR]
 
@@ -38,8 +37,8 @@ import wr_replay  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 TICK_MS = 10
 # Ghost samples are the game's float32 rigid-body position at the sample
-# time; the engine reproduces them exactly (docs/VALIDATOR.md, corpus
-# table), so anything beyond a millimetre is a different trajectory.
+# time; the engine reproduces them exactly, so anything beyond a millimetre is a
+# different trajectory.
 TRAJECTORY_TOLERANCE_M = 0.001
 # Ticks simulated past the recorded finish before giving up on a finish.
 FINISH_MARGIN_TICKS = 100
@@ -150,8 +149,8 @@ def ghost_script(ghost) -> tuple[str, dict[str, object]]:
         elif name in ("Brake", "BrakeReal"):
             key = "down"
         elif name == "Respawn":
-            # The press edge respawns the car at the last checkpoint
-            # (analysis/respawn.md); wr_replay.build_schedule sets
+            # The press edge respawns the car at the last checkpoint;
+            # wr_replay.build_schedule sets
             # TMNFRaceInputs.respawn on the start tick.
             key = "enter"
         elif name == "Steer":

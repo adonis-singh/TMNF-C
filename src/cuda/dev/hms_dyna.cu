@@ -1,2 +1,2 @@
-/* Device compilation unit for src/hms_dyna.c (see docs/CUDA.md). */
+/* Device compilation unit for src/hms_dyna.c. */
 #include "../../hms_dyna.c"

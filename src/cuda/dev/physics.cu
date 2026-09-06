@@ -1,2 +1,2 @@
-/* Device compilation unit for src/physics.c (see docs/CUDA.md). */
+/* Device compilation unit for src/physics.c. */
 #include "../../physics.c"

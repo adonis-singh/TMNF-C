@@ -611,7 +611,7 @@ def test_same_step_autoreset_invariant() -> None:
 def test_respawn_action_is_optional_and_restarts_before_a_checkpoint() -> None:
     """respawn_action=False keeps the twelve-action set; with it, action a + 12
     is action a plus the press, a press before any respawnable checkpoint ends
-    the episode as a restart (analysis/respawn.md), and the analog space
+    the episode as a restart, and the analog space
     gains a binary respawn key."""
     plain = TmnfVectorEnv(1, root=PROJECT_ROOT, thread_count=1)
     try:
@@ -840,7 +840,7 @@ def test_finish_beats_every_failure_and_progress_orders_failures() -> None:
 
     so finish > gas > coast, and gas - coast = gamma^Tmax (phi_gas - phi_coast).
     Before this identity the terminal potential was zeroed on failure and every
-    non-finishing episode had the same return (docs/RL_PLATFORM.md F33)."""
+    non-finishing episode had the same return."""
     from tmnf_rl.inputs import decode_discrete_schedule
 
     schedule = decode_discrete_schedule(

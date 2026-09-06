@@ -39,7 +39,7 @@ enum {
 /* 0x48-byte input packet consumed by the static 0x004FE500 mapper. The
  * mapper reads the eight timestamp/value words only; word +0x40 is never
  * read by the game and carries the race-level respawn press (Enter,
- * CTrackManiaRace::OnInputEvent -> SmallRespawn, analysis/respawn.md):
+ * CTrackManiaRace::OnInputEvent -> SmallRespawn):
  * nonzero on the tick the press edge applies. */
 typedef struct {
 	uint32_t steer_left_time;       /* 0x00 */

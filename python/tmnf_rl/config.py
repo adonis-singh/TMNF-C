@@ -29,37 +29,23 @@ class TrainConfig:
     learning_rate: float = 2.5e-4
     discount_per_tick: float = 0.9999
     gae_lambda: float = 0.95
-    # 8 minibatches x 4 epochs: the F36 ramp-collapse ablation winner (0/3
-    # seeds collapsed against 2/3 at 4 minibatches; docs/RL_PLATFORM.md,
-    # "Phase 2a").
     num_minibatches: int = 8
     update_epochs: int = 4
     clip_coef: float = 0.2
     ent_coef: float = 0.01
     vf_coef: float = 0.5
     max_grad_norm: float = 0.5
-    # Trust region: an update's remaining epochs are skipped once an epoch's
-    # mean approx_kl exceeds this (0 = never). 0.05 since 4 September 2026:
-    # the analog head of p4_b05_demo_60m_s1 diverged at update 4321 (one
-    # update with approx_kl 22.9, then |w_steer| 217 and log_std -15, no
-    # finishes for the remaining 1,700 updates); with 0.05 the same recipe
-    # ran 5,834 updates with a KL maximum of 0.269 and 2% of the updates cut
-    # short (docs/RL_PLATFORM.md, "Phase 4b").
+    # Skip remaining epochs when mean approx_kl exceeds this; 0 disables it.
     target_kl: float = 0.05
-    # Network arm: `mlp` (tanh, depth 2, width hidden_size, shared trunk; the
-    # pilot winner) or `transformer_s` (the pilot ladder's 0.8M tokenized
-    # transformer, K=0, torch.compile). Both read the fixed-scale encoder.
+    # MLP or tokenized transformer, both using the fixed-scale encoder.
     encoder_version: int = 1
     arch: str = "mlp"
     hidden_size: int = 256
     # Linear learning-rate warm-up over this many updates; 0 = none.
     lr_warmup_updates: int = 0
-    # 0 = derived natively per track: 2 x laps x route length at
-    # reference_speed (an average of 25 m/s), for both the race timeout and the
-    # collection horizon, with no clamp (a 12,000-tick cap made 12 of 27 tracks
-    # unfinishable, F22). Explicit values below the speed-cap bound abort
-    # environment creation (F20). The resolved values are in
-    # run.json.environment.
+    # Zero derives the budget from route length, laps and reference speed.
+    # Values below the speed-cap bound fail environment creation. Resolved
+    # budgets are recorded in run.json.environment.
     max_race_ticks: int = 0
     horizon_ticks: int = 0
     # Optional pace for automatic budgets only; progress rewards remain at
@@ -67,21 +53,12 @@ class TrainConfig:
     budget_reference_speed: float = 0.0
     off_track_grace_ticks: int = 100
     stuck_grace_ticks: int = 500
-    # Stuck = route progress changes by at most this many metres per tick for
-    # stuck_grace_ticks in a row. The native default of 1 mm let a policy park
-    # beside the A01 jump and jitter at 0.4 m/s until the 88 s timeout for
-    # 70% of its samples (F35); 20 mm (2 m/s) ends that in 5 s, while the
-    # longest sub-20 mm run on any world record or exported policy lap is 15
-    # ticks (the start).
+    # End an episode after this little progress per tick for
+    # stuck_grace_ticks consecutive ticks.
     stuck_progress_epsilon: float = 0.02
-    # Snapshot starts: this fraction of training resets restores a state from
-    # the pool of the agent's own best trajectories (tmnf_rl.snapshot_starts)
-    # instead of the grid start. 0 = every episode from the grid. Evaluation
-    # never uses the pool (F9). Captures happen every
-    # snapshot_capture_interval_ticks in snapshot_capture_episode_fraction of
-    # the episodes. 0.5 since 3 September 2026: A04 went from 0 finishes to
-    # a 5.90 s greedy lap at 0.25 and 0.5, and A01 did not regress at 0.5
-    # (docs/RL_PLATFORM.md, "Phase 2b").
+    # Fraction of training resets drawn from the agent's own trajectory
+    # snapshot pool. Zero uses only grid starts; evaluation always uses the grid.
+    # Capture frequency and the fraction of episodes sampled are set below.
     snapshot_start_fraction: float = 0.5
     snapshot_capture_interval_ticks: int = 100
     snapshot_capture_episode_fraction: float = 0.25
@@ -108,8 +85,7 @@ class TrainConfig:
     td3_warmup_steps: int = 64
     td3_critic_width: int = 512
     td3_bins: int = 201
-    # Phase 6 exploration arms (tmnf_rl.exploration; analysis/rl_training.md
-    # "Phase 6: pure learning"). All off by default.
+    # Optional exploration settings (tmnf_rl.exploration).
     # (a) Landing novelty: a landing after >= 2 airborne decisions adds
     # novelty_coef / sqrt(n) to that decision's reward, n the run's visits of
     # the (20 m progress bin, airborne decisions, 2 m/s speed bin) cell.
@@ -128,21 +104,19 @@ class TrainConfig:
     ema_decay: float = 0.0
     lr_decay_updates: int = 0
     # (e) Finish-time-only reward: the native shaped reward (progress
-    # potential, F33) trains the policy until its first training finish; from
+    # potential) trains the policy until its first training finish; from
     # the next decision on every reward is 0 except the finishing decision,
     # which pays the unused race budget in seconds, (max_race_ticks - lap
     # ticks) / 100. Failures pay 0. Off by default.
     finish_time_reward: bool = False
-    # Off by default: a01_ppo_baseline_20m_s1 (stagger on) finished 0 laps in
-    # 20 minutes; a01_ppo_baseline_20m_s1_nostagger had 43,459 finishes and a
-    # 24.98 s best after 9 minutes. See docs/RL_PLATFORM.md footgun F18.
+    # Optionally stagger episode start phases.
     staggered_phases: bool = False
     stagger_max_seconds: float = 2.0
     eval_interval_minutes: float = 5.0
     eval_num_envs: int = 64
     # Episodes of the sampled-policy evaluation (actions drawn from the policy
     # with the run seed). The greedy evaluation runs one round of eval_num_envs:
-    # it is a single trajectory, reported as `finished`, not a rate (F29).
+    # it is a single trajectory, reported as `finished`, not a rate.
     eval_episodes: int = 256
     checkpoint_interval_minutes: float = 5.0
     # Where the training environments run: `cpu` (TmnfVectorEnv, thread_count

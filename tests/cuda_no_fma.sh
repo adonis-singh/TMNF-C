@@ -1,6 +1,6 @@
 #!/bin/sh
 # The exactness proof of the CUDA backend rests on every binary32 operation
-# rounding once (docs/CUDA.md). A contracted multiply-add rounds once for two
+# rounding once. A contracted multiply-add rounds once for two
 # operations and diverges from the CPU at tick 2. -fmad=false is passed to
 # nvcc, and because the device LTO backend runs inside nvlink and does not
 # inherit it, CMakeLists.txt also passes -Xnvlink -Xnvvm=-fma=0 and

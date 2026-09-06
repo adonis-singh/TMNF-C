@@ -82,7 +82,7 @@ def collect(
         )
         info["cudnn_version"] = torch_module.backends.cudnn.version()
         # The float32 CUDA switches pin_cuda_numerics set; collect() must run
-        # after select_device() so this records the pinned state (F24).
+        # after select_device() so this records the pinned state.
         from tmnf_rl.agents.ppo import numerics_state
 
         info["numerics"] = numerics_state()
@@ -96,7 +96,7 @@ def collect(
 
 
 # Provenance fields that must match between two processes for their metrics
-# to be comparable; `reproduce` refuses when any of them differ (F24).
+# to be comparable; `reproduce` refuses when any of them differ.
 NUMERICS_FIELDS = (
     "torch_version",
     "cuda_version",

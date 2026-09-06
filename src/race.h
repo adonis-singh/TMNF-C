@@ -1,14 +1,13 @@
 /* TMNF race progression over an immutable TmnfRoute snapshot.
  *
- * Rules follow the game as measured against six TMX world-record replays
- * (analysis/game_rules.md):
+ * Rules follow the game as measured against six TMX world-record replays:
  *   - a checkpoint counts once per lap, in any order; the finish counts only
  *     when every checkpoint of the lap has been taken;
  *   - a trigger fires when a car collision ellipsoid touches the trigger
  *     volume, computed with the game's own narrowphase, not when the root
  *     bounding boxes overlap, and tested where the game tests it: in every
  *     collision detection pass of the physics step, against the predicted
- *     pre-response transform (analysis/game_rules.md, "Trigger timing");
+ *     pre-response transform;
  *   - "off track" means every wheel in ground contact rests on the stadium
  *     ground plane (Grass material), which no record line ever touches;
  *   - progress is credited only inside the route corridor (horizontal offset
@@ -44,8 +43,8 @@ enum {
  * Route corridor. The car is inside when its horizontal (XZ) distance from
  * the projected centerline point is at most max(WIDTH_FACTOR * half_width,
  * WIDTH_FLOOR) and its height relative to that point lies in
- * [-BELOW, ABOVE]. Bounds come from every committed game capture
- * (analysis/rl_env.md, "Corridor"): record lines reach 24.6 m off the
+ * [-BELOW, ABOVE]. Bounds come from every committed game capture: record lines reach
+ * 24.6 m off the
  * centerline (E01 wall ride, 2.9 half-widths on an 8.3 m sample and 20
  * half-widths where the route width degenerates to 1.0 m), 17.6 m above
  * (E01) and 12.7 m below (E01, B04) while grounded; the A01 record's final
@@ -104,7 +103,7 @@ typedef struct {
  * The Stadium ground plane (StadiumGrass terrain: Grass, WetGrass). Every
  * Stadium block surface reports another id. Other collections have their own
  * terrain material (to be read from each environment's first track snapshot
- * before the race layer is used there; see analysis/materials.md).
+ * before the race layer is used there).
  */
 TMNF_HD static inline int TmnfRace_IsGroundPlaneMaterial(int32_t material_id)
 {
@@ -131,8 +130,8 @@ TMNF_HD int TmnfRace_TriggerContact(
  * for checkpoint i, TMNF_RACE_FINISH_CONTACT_BIT for the finish. The
  * physics step calls this from each collision detection pass with the
  * predicted pre-response iso the detection itself used, which is when and
- * where the game raises the waypoint contact (analysis/game_rules.md,
- * "Trigger timing"), and ORs the passes into TmnfPhysicsWorld.trigger_contacts.
+ * where the game raises the waypoint contact, and ORs the passes into
+ * TmnfPhysicsWorld.trigger_contacts.
  */
 TMNF_HD uint64_t TmnfRace_TriggerContactMask(
 	const TmnfRoute *route,
@@ -182,7 +181,7 @@ TMNF_HD TmnfRaceStepResult TmnfRace_Step(
  * when no respawnable checkpoint has been passed: the game then restarts the
  * race (CGameRace::SetStatus(3)) rather than moving the car. The caller
  * applies it with World_Respawn before the tick's input mapping and physics
- * step (analysis/respawn.md).
+ * step.
  */
 TMNF_HD const GmIso4 *TmnfRace_RespawnLocation(const TmnfRaceState *state);
 

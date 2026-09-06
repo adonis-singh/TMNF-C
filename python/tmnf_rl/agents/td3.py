@@ -1,5 +1,4 @@
-"""Off-policy large-batch actor-critic on the vectorised env (Phase 6 rank 2:
-FastTD3 / PQL shape). One environment step of all N environments per
+"""Off-policy large-batch actor-critic on the vectorised env. One environment step of all N environments per
 iteration, a device-resident replay buffer, twin distributional critics
 (HL-Gauss categorical over the shaped return), a deterministic actor with
 Gaussian exploration noise, Polyak targets, delayed actor updates.
@@ -9,14 +8,11 @@ u = tanh(raw) in [-1, 1]; the critics take (state, steer) and output one
 return distribution per pedal combination k in {none, gas, brake, both}.
 Acting picks k = argmax_k Q(s, u, k) (epsilon-greedy over k), so the pedals
 are learnt by Q-learning and the steer by the deterministic policy gradient
-through Q(s, ., k). The first version thresholded two tanh coordinates for
-the pedals; Adam saturated them within 9,000 steps (u = -1 for both, the
-critic's tiny preference for gas unreachable through tanh'(raw) = 0) and the
-car never moved. Exploration: N(0, sigma) on the steer, uniform k with
+through Q(s, ., k). Exploration: N(0, sigma) on the steer, uniform k with
 probability pedal_epsilon, and a small pre-tanh penalty keeps the steer
 head off saturation.
 
-Return support: the shaped return (analysis/rl_env.md) is bounded above by
+Return support: the shaped return is bounded above by
 route / 50 (a finish from the grid at infinite speed) and a failure costs at
 most the budget's ticks, 0.01 (1 - gamma^Tmax) / (1 - gamma); the critic's
 categorical support is [-budget cost, route / 50] (bins in config), so no

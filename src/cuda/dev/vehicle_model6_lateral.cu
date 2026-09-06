@@ -1,2 +1,2 @@
-/* Device compilation unit for src/vehicle_model6_lateral.c (see docs/CUDA.md). */
+/* Device compilation unit for src/vehicle_model6_lateral.c. */
 #include "../../vehicle_model6_lateral.c"

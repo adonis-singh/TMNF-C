@@ -129,8 +129,8 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     physics_sha256 = provenance.sha256_file(physics_library)
     env = make_env(config, args.envs, physics_library)
     try:
-        # Greedy: one round of the environments is the whole trajectory set
-        # (F29); --episodes drives the sampled evaluation.
+        # Greedy: one round of the environments is the whole trajectory set; --episodes
+        # drives the sampled evaluation.
         result = evaluate_full_start(
             agent, env, args.envs, device, pedal_hold_decisions=config.pedal_hold_decisions
         )

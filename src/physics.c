@@ -1,10 +1,6 @@
 /* CHmsZoneDynamic top-level force and tick orchestration, transcribed from the
  * 2.11.26 disassembly. Runtime x87 PC=24 is represented by per-operation
  * x87_* rounding from tmnf_fp.h.
- *
- * UNVALIDATED end-to-end: the control flow is complete for the standard
- * car-on-track path, pending linkage of the separately ported vehicle-force
- * entry and collision-response solver plus full PhysicsStep2 golden replay.
  */
 #include "physics.h"
 #include "tmnf_warp.h"
@@ -51,8 +47,7 @@ TMNF_HD static void detect_and_respond(
 	/* The waypoint corpora are static-tree entries of the game's zone, so
 	 * this pass detected the car against them with the same predicted iso
 	 * (corpus_iso: live_iso of a dynamic corpus), and ComputeCollisionResponse
-	 * below is where their contact sink raises OnCheckpoint/OnFinishLine
-	 * (analysis/game_rules.md, "Trigger timing"). The port's zone has no
+	 * below is where their contact sink raises OnCheckpoint/OnFinishLine. The port's zone has no
 	 * trigger corpora; the route's volumes are tested here instead. */
 	if (world->route != NULL && corpus->vehicle != NULL) {
 		world->trigger_contacts |= TmnfRace_TriggerContactMask(

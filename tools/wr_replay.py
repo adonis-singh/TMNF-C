@@ -24,7 +24,7 @@ Subcommands:
 
 Tick i of a schedule corresponds to TMInterface race time i*10 ms. An event at
 time t applies from tick t/10 on. These conventions were measured against the
-A01 record capture (see analysis/game_rules.md).
+A01 record capture.
 """
 
 from __future__ import annotations

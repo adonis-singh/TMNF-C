@@ -5,7 +5,7 @@ ships no installed tracks. The track catalogue reads your generated
 `oracle/tracks/manifest.txt`; each entry needs its matching track, vehicle and
 route files.
 
-The research Python environment uses Python 3.12:
+Use Python 3.12 for the training environment:
 
 ```bash
 uv venv --python python3.12 build/venv
@@ -21,9 +21,8 @@ CUDA_VISIBLE_DEVICES=0 PYTHONPATH=python build/venv/bin/python \
 ```
 
 Select one GPU explicitly and choose a CPU thread count appropriate to the
-machine. Public builds do not reserve the original workstation's CPU IDs.
-Set `TMNF_RESERVED_CPUS` to a comma-separated list and use `taskset` if you
-want to protect cores for other work.
+machine. To protect cores for other work, set `TMNF_RESERVED_CPUS` to a
+comma-separated list and use `taskset` to exclude those cores.
 
 Training writes local runs below `build/runs/`. Evaluate with
 `python -m tmnf_rl.evaluate <run-id-or-policy-path>` using the same environment

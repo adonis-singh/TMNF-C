@@ -17,7 +17,7 @@ add_compile_options(
 
 # Tunes for the build host (AVX encodings, scheduling); no FMA because of
 # -ffp-contract=off, so results are unchanged. Off by default to keep the
-# release binaries portable. Measured -3.5% cycles on Zen 5 (analysis/perf.md).
+# release binaries portable.
 option(TMNF_MARCH_NATIVE "Compile with -march=native" OFF)
 if(TMNF_MARCH_NATIVE)
 	add_compile_options(-march=native)
@@ -81,7 +81,7 @@ add_executable(
 	"${CMAKE_SOURCE_DIR}/tools/export_viewer_scene.c")
 target_link_libraries(export_viewer_scene tmnf_physics m)
 
-# CUDA backend (docs/CUDA.md). The physics .c files are compiled a second time
+# CUDA backend. The physics .c files are compiled a second time
 # as CUDA C++ through the stubs in src/cuda/dev/, so the GPU runs the same
 # source as the CPU library. Numerics: no FMA contraction, IEEE division and
 # square root, no flush-to-zero, no fast math.

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Copy never-written game memory from the native capture before a byte compare.
 
-Every word touched here is justified in analysis/capture_normalization.md.
 The rule is the same for all of them: a word is normalized only while no game
 code can have written it since CSceneVehicleCar::VehicleReset, so its content
 is heap leftover of the capturing process and not a physical quantity. Once

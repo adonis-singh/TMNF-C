@@ -1,2 +1,2 @@
-/* Device compilation unit for src/vehicle_oldmodels.c (see docs/CUDA.md). */
+/* Device compilation unit for src/vehicle_oldmodels.c. */
 #include "../../vehicle_oldmodels.c"

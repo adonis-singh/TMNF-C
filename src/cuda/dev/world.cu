@@ -1,2 +1,2 @@
-/* Device compilation unit for src/world.c (see docs/CUDA.md). */
+/* Device compilation unit for src/world.c. */
 #include "../../world.c"

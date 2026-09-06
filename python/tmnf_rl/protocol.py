@@ -5,7 +5,7 @@ trains one registered run per seed (sequentially, one GPU), then aggregates
 ``evaluations.csv`` at every scheduled minute into median and IQR across seeds
 and writes a small JSON summary meant to be committed.
 
-Rules baked in (see docs/RL_PLATFORM.md):
+Rules baked in:
 
 * every run in a protocol must report the same physics and code hash;
 * laps are only aggregated over seeds that finished; the finishing-seed count
@@ -151,7 +151,7 @@ def summarize(
         raise RuntimeError(
             f"protocol runs disagree on physics {sorted(physics)} or code {sorted(code)}"
         )
-    # A run resumed across a code change (F25) has rows its code_sha256 did not
+    # A run resumed across a code change has rows its code_sha256 did not
     # produce; it cannot stand in a protocol that claims one code hash.
     changed = {
         seed: payload["code_changes"]

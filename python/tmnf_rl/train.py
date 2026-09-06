@@ -116,7 +116,7 @@ class RegistrySink:
             "policy": policy,
             "row": evaluation,
             # `result` is the greedy trajectory (the replayed lap); `sampled`
-            # is the policy sampled from the same start (F29).
+            # is the policy sampled from the same start.
             "result": result.to_json(),
             "sampled": sampled.to_json(),
             "replay": None,
@@ -188,7 +188,7 @@ class RegistrySink:
         the `evals/<minute>.json` files, the `replays/*` files and the
         `run.json.replays` entries of those minutes would otherwise survive
         and seed `best_replay_lap_ms` from a lap the resumed timeline never
-        drove (F30). The evaluations at those minutes are regenerated.
+        drove. The evaluations at those minutes are regenerated.
         """
         discarded_minutes: list[float] = []
         evals_dir = self.run_dir / "evals"
@@ -237,7 +237,7 @@ def main(argv: list[str] | None = None) -> None:
     # The run directory is locked for the whole process lifetime, before any
     # environment or CUDA work: two trainers on one run (a duplicate --run-id
     # or two --resume) would otherwise interleave metrics.csv and race on
-    # latest.pt (F23). The kernel releases the lock when this process dies.
+    # latest.pt. The kernel releases the lock when this process dies.
     if resume_id is not None:
         runs_root = Path(overrides.get("runs_root", TrainConfig.runs_root))
         registry = RunRegistry(root / runs_root if not runs_root.is_absolute() else runs_root)
@@ -278,7 +278,7 @@ def main(argv: list[str] | None = None) -> None:
             physics_library = root / physics_library
         physics_library = physics_library.resolve()
         # Pin CUDA numerics before the CUDA context exists and before provenance
-        # is collected, so run.json records the pinned state (F24).
+        # is collected, so run.json records the pinned state.
         trainer_rng = seed_everything(config.seed)
         device, gpu_name = select_device()
         provenance_info = provenance.collect(
@@ -290,7 +290,7 @@ def main(argv: list[str] | None = None) -> None:
                 f"{record.payload['physics_sha256']} -> {provenance_info['physics_sha256']}"
             )
         # A resume across a python/tmnf_rl change produces rows the run's
-        # code_sha256 did not produce (F25). Refuse unless asked; when asked,
+        # code_sha256 did not produce. Refuse unless asked; when asked,
         # the change is recorded under code_changes below.
         code_changed = (
             record is not None
@@ -462,7 +462,7 @@ def main(argv: list[str] | None = None) -> None:
         failure = "".join(traceback.format_exception(error)).strip()
         # The cause goes to stderr first: when the failure is a full disk the
         # run.json write below fails too and would otherwise be the only
-        # traceback anyone sees (F27).
+        # traceback anyone sees.
         print(f"tmnf_rl.train: run {run_id} failed:\n{failure}", file=sys.stderr, flush=True)
         record.finish("failed", failure=failure, spectate_url=None)
         raise

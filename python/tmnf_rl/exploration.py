@@ -1,6 +1,4 @@
-"""Exploration arms of Phase 6 (analysis/rl_training.md, "Phase 6: pure
-learning"). Everything here reads the environment alone: no recorded laps,
-no hand-placed states.
+"""Exploration bonuses and temporally extended pedal actions.
 
 ``LandingNovelty``: a count-based bonus on a physical descriptor of each
 landing, (20 m progress bin, airborne decisions, 2 m/s landing speed bin).

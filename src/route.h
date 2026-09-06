@@ -96,7 +96,7 @@ typedef struct {
 
 /* spawn is CGameCtnBlock::GetSpawnLoc (0x0060B410) of the start block: the
  * isometry a respawn places the car at when the current lap has no
- * checkpoint yet (analysis/respawn.md). */
+ * checkpoint yet. */
 typedef struct {
 	GmIso4 transform;
 	TmnfRouteInitialState initial_state;

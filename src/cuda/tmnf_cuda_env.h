@@ -1,5 +1,5 @@
 /* CUDA vectorised environment: TmnfVecEnv semantics, one GPU thread per
- * environment, byte-exact with the CPU engine (docs/CUDA.md).
+ * environment, byte-exact with the CPU engine.
  *
  * Every environment is a byte copy of one host TmnfWorld relinked on the
  * device against a shared immutable track, vehicle blob and route plus
