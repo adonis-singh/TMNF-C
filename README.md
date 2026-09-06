@@ -62,8 +62,8 @@ test coverage and result qualifications.
 ## Current limitations
 
 The project focuses on campaign racing. Route guidance and learning budgets
-still need work across tracks. Force models 4 and 5 and speed-glitch regimes
-remain unvalidated. The supported setup is a Linux source checkout; generating
+still need work across tracks. Force models 4 and 5 remain unvalidated. Glitch comparisons currently cover
+two TAS runs; see [validation details](docs/VALIDATION.md#glitch-replays). The supported setup is a Linux source checkout; generating
 complete RL fixtures currently requires a running game through Wine/TMInterface.
 
 ## License

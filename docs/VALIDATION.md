@@ -28,6 +28,31 @@ This validates one fresh import from a configured lane, not a clean-machine
 installer or every campaign track's route quality. Visual extraction was not
 part of this headless import check.
 
+## Glitch replays
+
+Two TAS input schedules were captured in the game and compared with the CPU
+and CUDA simulators. A01-Race's 17.610-second noseboost run by igntuL, lukalyc,
+Na'Guul and trabadia matched all 1,782 captured ticks. A12-Speed's
+10.100-second run by AurisTFG and Sokko matched all 1,031 ticks, including the
+sideways gas/brake/steer sequence and subsequent uberbug launch.
+The source replays are TAS Exchange entries
+[53](https://tmtas.exchange/api/replay?id=53) and
+[128](https://tmtas.exchange/api/replay?id=128).
+
+Both game runs reproduced the recorded finish times with zero accepted-input
+mismatches. A01 reached 1,422.3 km/h. A12 accelerated from 312.6 to 485.8 km/h
+between captured ticks 656 and 657. Comparisons use the existing normalization
+of never-written memory fields and upper material bits; physical state and
+surface positions are not normalized. CUDA comparisons used an RTX 3060.
+
+These checks cover the specific noseboost and bugslide/uberbug sequences in
+those runs. Standalone sustained bugslides and other glitch variations still
+need dedicated coverage. Replay inputs and game captures are local fixtures.
+To capture and compare either replay after local asset setup, use
+`tools/wr_replay.py run TRACK REPLAY --tag TAG`; lane options are listed in
+`--help`. The saved events JSON includes the native replay exit status and
+comparison output.
+
 ## Policy results
 
 The README reports per-track policies evaluated from the official start.
