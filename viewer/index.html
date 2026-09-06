@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta name="theme-color" content="#0b1018">
+	<title>TMNF-C Training Spectator</title>
+	<link rel="stylesheet" href="viewer.css?v=runs2">
+</head>
+<body>
+	<div id="viewport" aria-hidden="true"></div>
+
+	<div id="left-column">
+	<header id="scene-panel" class="instrument">
+		<div class="eyebrow">Bit-exact physics reconstruction</div>
+		<div class="scene-title-row">
+			<h1>Stadium training instrument</h1>
+			<span class="status-meta">10 ms / tick</span>
+		</div>
+		<div id="scene-status">Loading policy lap…</div>
+		<div class="scene-actions">
+			<select id="viewer-mode" aria-label="Viewer mode">
+				<option value="replay" selected>Replay</option>
+				<option value="live">Live training</option>
+			</select>
+			<select id="scene-select" aria-label="Committed replay scene">
+				<option value="scenes/policy_lap.json">A01 · Policy lap</option>
+				<option value="scenes/a10_turbo.json">A10 · Acrobatic turbo</option>
+				<option value="scenes/a08_mixed.json">A08 · Endurance mixed</option>
+				<option value="scenes/b04_mixed.json">B04 · Acrobatic mixed</option>
+				<option value="scenes/e01_mixed.json">E01 · Obstacle mixed</option>
+				<option value="scenes/c03_mixed.json">C03 · Acrobatic mixed</option>
+			</select>
+			<select id="visual-mode" aria-label="Track visual mode">
+				<option value="game" selected>Game visuals</option>
+				<option value="collision">Collision geometry</option>
+			</select>
+			<select id="ghost-select" aria-label="Ghost replay for comparison">
+				<option value="" selected>No ghost</option>
+				<option value="scenes/policy_lap.json">Ghost · A01 policy lap</option>
+				<option value="scenes/a10_turbo.json">Ghost · A10 turbo</option>
+				<option value="scenes/a08_mixed.json">Ghost · A08 mixed</option>
+				<option value="scenes/b04_mixed.json">Ghost · B04 mixed</option>
+				<option value="scenes/e01_mixed.json">Ghost · E01 mixed</option>
+				<option value="scenes/c03_mixed.json">Ghost · C03 mixed</option>
+			</select>
+			<label class="file-button" for="file-input" tabindex="0">Open JSON</label>
+			<input id="file-input" type="file" accept=".json,.gz,application/json,application/gzip">
+			<button id="overlay-toggle" type="button">Hide overlays</button>
+		</div>
+		<div id="live-controls">
+			<input id="live-url" type="url" value="http://localhost:8765"
+				aria-label="Training spectate server URL" spellcheck="false">
+			<button id="live-connect" type="button">Connect</button>
+		</div>
+	</header>
+
+	<aside id="runs-panel" class="instrument" aria-label="Training runs">
+		<div class="runs-heading">
+			<div>
+				<div class="metric-label">Training runs</div>
+				<div id="runs-state"><span class="live-dot"></span>Connecting</div>
+			</div>
+			<button id="runs-toggle" type="button" aria-expanded="true">Hide</button>
+		</div>
+		<div id="runs-body">
+			<div class="runs-section">
+				<span class="metric-label">Live</span>
+				<span id="live-count" class="runs-count">0</span>
+			</div>
+			<ul id="live-runs" class="run-list"></ul>
+			<div class="runs-section">
+				<span class="metric-label">Past runs</span>
+				<select id="runs-sort" aria-label="Sort past runs">
+					<option value="date" selected>Newest first</option>
+					<option value="lap">Best lap</option>
+					<option value="track">Track</option>
+				</select>
+			</div>
+			<ul id="past-runs" class="run-list"></ul>
+		</div>
+	</aside>
+
+	<aside id="live-panel" class="instrument" aria-label="Live training status">
+		<div class="live-heading">
+			<div>
+				<div class="metric-label">Training stream</div>
+				<div id="live-state"><span class="live-dot"></span>Waiting</div>
+			</div>
+			<div id="live-track">--</div>
+		</div>
+		<div class="live-metrics">
+			<div><span class="metric-label">Update</span><strong id="live-update">0</strong></div>
+			<div><span class="metric-label">Finishes</span><strong id="live-finishes">0</strong></div>
+			<div><span class="metric-label">Best lap</span><strong id="live-best">--</strong></div>
+			<div><span class="metric-label">Mean distance</span><strong id="live-distance">--</strong></div>
+		</div>
+		<div class="live-follow-row">
+			<button id="follow-best" type="button" class="active" aria-pressed="true">Auto-follow best</button>
+			<span id="live-following">--</span>
+		</div>
+		<div class="feed-heading metric-label">Episode terminations</div>
+		<ul id="termination-feed"><li>Waiting for episode data</li></ul>
+	</aside>
+	</div>
+
+	<aside id="telemetry" class="instrument" aria-label="Live telemetry">
+		<div class="speed-row">
+			<div>
+				<div class="metric-label">Velocity</div>
+				<span id="speed">000</span>
+				<div class="speed-unit">KM/H</div>
+			</div>
+			<div class="gear-block">
+				<div class="metric-label">Gear</div>
+				<div id="gear">N</div>
+			</div>
+		</div>
+
+		<div class="rpm-row">
+			<div>
+				<div class="metric-label">Engine speed</div>
+				<div class="rpm-track"><div id="rpm-fill"></div></div>
+			</div>
+			<div id="rpm">0 RPM</div>
+		</div>
+
+		<div class="telemetry-lower">
+			<div>
+				<div class="metric-label">Race time</div>
+				<div id="race-time" class="time-value">00:00.000</div>
+				<div class="tick-row">
+					<span class="metric-label">Tick&nbsp;&nbsp;</span>
+					<span id="tick">0000 / 0000</span>
+				</div>
+			</div>
+			<div>
+				<div class="car-schematic" aria-label="Wheel contact schematic">
+					<div class="schematic-axis"></div>
+					<div class="schematic-body"></div>
+					<div class="wheel-node" data-wheel="FL"></div>
+					<div class="wheel-node" data-wheel="FR"></div>
+					<div class="wheel-node" data-wheel="RL"></div>
+					<div class="wheel-node" data-wheel="RR"></div>
+				</div>
+				<div class="schematic-legend">
+					<span class="contact-key">contact</span>
+					<span class="slide-key">slide</span>
+				</div>
+			</div>
+		</div>
+	</aside>
+
+	<aside id="minimap-panel" class="instrument" aria-label="Track minimap">
+		<div class="map-heading">
+			<span class="metric-label">Trajectory plan</span>
+			<span id="map-distance">0 M</span>
+		</div>
+		<canvas id="minimap" width="468" height="300"></canvas>
+	</aside>
+
+	<section id="timeline-panel" class="instrument" aria-label="Replay controls">
+		<div class="control-row">
+			<button id="play" type="button">Play</button>
+			<select id="speed-select" aria-label="Playback speed">
+				<option value="0.25">0.25×</option>
+				<option value="0.5">0.5×</option>
+				<option value="1" selected>1×</option>
+				<option value="2">2×</option>
+				<option value="4">4×</option>
+				<option value="8">8×</option>
+			</select>
+			<select id="camera-select" aria-label="Camera mode">
+				<option value="chase" selected>Chase</option>
+				<option value="orbit">Orbit</option>
+				<option value="top">Top</option>
+				<option value="beauty">Beauty</option>
+			</select>
+			<div class="timeline">
+				<div id="timeline-markers"></div>
+				<input id="scrubber" type="range" min="0" max="0" value="0" step="1" aria-label="Replay tick">
+			</div>
+			<div id="time-readout">00:00.000</div>
+		</div>
+		<div id="compare-strip" hidden>
+			<div class="compare-head">
+				<span class="metric-label">Ghost</span>
+				<span id="compare-name">--</span>
+				<button id="compare-clear" type="button">Clear</button>
+			</div>
+			<div id="compare-cells"></div>
+		</div>
+		<div class="control-meta">
+			<span>Space · play / pause</span>
+			<span>Markers · checkpoints / finish</span>
+			<span id="fps">-- FPS</span>
+		</div>
+	</section>
+
+	<div id="error" role="alert" title="Click to dismiss"></div>
+
+	<script src="vendor/three.min.js"></script>
+	<script src="track_instances.js"></script>
+	<script src="viewer.js?v=runs2"></script>
+</body>
+</html>

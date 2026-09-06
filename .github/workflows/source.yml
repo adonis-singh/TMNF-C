@@ -1,0 +1,17 @@
+name: Source-only build
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check distribution boundary
+        run: python3 tools/audit_public_tree.py
+      - name: Configure without game assets
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DTMNF_CUDA=OFF
+      - name: Build
+        run: cmake --build build -j2
+      - name: Test synthetic inputs
+        run: ctest --test-dir build --output-on-failure

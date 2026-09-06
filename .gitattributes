@@ -1,0 +1,2 @@
+# Preserve upstream license text verbatim.
+viewer/fonts/LICENSE-ibm-plex.txt -text -whitespace
