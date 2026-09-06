@@ -710,13 +710,13 @@ def run_assets(current: tuple[Track, Path, Path]) -> None:
     ]
     for record in records:
         identifier, name, _, _ = record
-        if identifier in ("a01", "a10"):
-            continue
         registered = track_from_manifest(identifier, name)
         if registered.environment != "stadium":
             continue
         source = challenge_for(registered)
         source_scene = ROOT / f"viewer/scenes/{identifier}_mixed.json"
+        if not source_scene.is_file():
+            continue
         arguments.extend(("--track", f"{identifier}={source}"))
         arguments.extend(("--scene-source", f"{identifier}={source_scene}"))
     if track.id not in known:
@@ -796,6 +796,8 @@ def capture_reference(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("track_name")
+    parser.add_argument("--visuals", action="store_true",
+                        help="also extract local Stadium viewer models and textures")
     parser.add_argument("--force", action="store_true",
                         help="discard existing outputs and recapture")
     parser.add_argument("--reuse-captures", action="store_true",
@@ -920,7 +922,8 @@ def main() -> int:
             challenge_sha256, track_id, scene,
         ]), env=clean_environment(), timeout=600)
         variants_before = asset_variant_count()
-        run_assets((current, challenge, scene))
+        if args.visuals:
+            run_assets((current, challenge, scene))
         variants_after = asset_variant_count()
 
         exact = {replay.name: replay.exact for replay in replays}

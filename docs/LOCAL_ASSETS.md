@@ -74,7 +74,9 @@ build/venv/bin/python tools/onboard_track.py A04-Acrobatic \
   --cpu-set 0,1 --dry-run
 ```
 
-Remove `--dry-run` to capture and validate the track. The tool generates
+Remove `--dry-run` to capture and validate the track. Add `--visuals` to
+extract viewer models and textures as well; RL fixture generation does not
+require those visual assets. The tool generates
 track, vehicle and route snapshots, checks accepted inputs and native replay,
 and builds route guidance. It writes a local catalogue under `oracle/tracks/`
 and keeps captures, caches and viewer outputs in ignored directories.

@@ -762,17 +762,10 @@ def main():
     CACHE.mkdir(parents=True)
     work = CACHE / "work"
     work.mkdir()
-    challenge_paths = {
-        "a01": campaign / "A01-Race.Challenge.Gbx",
-        "a10": campaign / "A10-Acrobatic.Challenge.Gbx",
-    }
-    challenge_paths.update(parse_named_paths(args.track, "--track"))
-    scene_sources = {
-        "a01": ROOT / "viewer/scenes/policy_lap.json",
-        "a10": ROOT / "viewer/scenes/a10_turbo.json",
-    }
-    scene_sources.update(parse_named_paths(
-        args.scene_source, "--scene-source"))
+    challenge_paths = parse_named_paths(args.track, "--track")
+    scene_sources = parse_named_paths(args.scene_source, "--scene-source")
+    if not challenge_paths:
+        fail("provide at least one --track ID=CHALLENGE and --scene-source ID=SCENE")
     if challenge_paths.keys() != scene_sources.keys():
         fail("--track and --scene-source IDs must match")
     for name, path in (*challenge_paths.items(), *scene_sources.items()):
