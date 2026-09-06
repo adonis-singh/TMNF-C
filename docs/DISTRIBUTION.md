@@ -1,8 +1,8 @@
 # Source distribution boundary
 
-This public candidate is a new source snapshot. The private research history
-and asset corpus remain in a separate local checkout and backup. They must
-not be merged or pushed into a repository intended to be public.
+This repository has clean source history. Private research data and the old
+Git history are preserved locally under ignored `local/archive/`, not in a
+second active repository. They must never be committed or pushed here.
 
 The source contains simulator code, bindings, training tools, capture and
 local asset-generation tools, synthetic tests and viewer code. Third-party
