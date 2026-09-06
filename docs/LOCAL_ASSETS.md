@@ -51,6 +51,14 @@ require Wine, Xvfb, a 32-bit MinGW toolchain, curl, unzip, iproute2 and ripgrep.
 The tracer is a local mod loaded through Ultimate ASI Loader; its installer
 preserves the original `binkw32.dll` as `binkw32Hooked.dll`.
 
+Custom maps may require the game to compute lightmaps before starting a race.
+If Wine reports shader compilation errors followed by a crash in
+`CHmsPackLightMap::InitBitmapsAndRaster`, install the native DirectX 9 shader
+library in the capture prefix with
+`WINEPREFIX=/absolute/path/to/prefix winetricks -q d3dx9_31`.
+Allow the first shadow calculation to finish before capturing. This affects
+the game-side renderer, not the simulator's physics.
+
 The lane uses `third_party/venv/bin/python`, the trainer uses
 `build/venv/bin/python`, and the ModLoader installations live in
 `third_party/TMLoader` or `third_party/TMLoader_united`. Configure ModLoader
