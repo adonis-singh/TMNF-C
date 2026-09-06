@@ -85,13 +85,7 @@ target_link_libraries(export_viewer_scene tmnf_physics m)
 # as CUDA C++ through the stubs in src/cuda/dev/, so the GPU runs the same
 # source as the CPU library. Numerics: no FMA contraction, IEEE division and
 # square root, no flush-to-zero, no fast math.
-include(CheckLanguage)
-check_language(CUDA)
-if(CMAKE_CUDA_COMPILER)
-	option(TMNF_CUDA "Build the CUDA backend" ON)
-else()
-	option(TMNF_CUDA "Build the CUDA backend" OFF)
-endif()
+option(TMNF_CUDA "Build the optional CUDA backend" OFF)
 if(TMNF_CUDA)
 	enable_language(CUDA)
 	set(CMAKE_CUDA_STANDARD 17)

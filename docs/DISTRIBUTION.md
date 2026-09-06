@@ -6,8 +6,7 @@ not be merged or pushed into a repository intended to be public.
 
 The source contains simulator code, bindings, training tools, capture and
 local asset-generation tools, synthetic tests and viewer code. Third-party
-viewer libraries and fonts retain their own licenses. The original code
-license must be selected before publication.
+viewer libraries and fonts retain their own licenses. Original project code is MIT-licensed; this does not license game assets.
 
 Game packs, executables, raw and converted geometry, vehicle and route
 snapshots, image data, captures, replays, model weights and generated scenes

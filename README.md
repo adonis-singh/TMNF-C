@@ -27,6 +27,9 @@ workflow uses your installed game packs for the physics image and a local
 Wine/TMInterface capture lane for track, vehicle and route snapshots. It is
 not yet a packs-only importer for a complete racing environment.
 
+The [validation report](docs/VALIDATION.md) records the source and local-data
+checks performed for this preview.
+
 The [Python guide](docs/TRAINING.md) covers training and evaluation after
 local fixture generation. CUDA is optional; enable `TMNF_CUDA` and set
 `CMAKE_CUDA_ARCHITECTURES` for your GPU when configuring the build. Research
@@ -82,5 +85,6 @@ compiled libraries containing locally extracted image data must stay out of
 source commits and release uploads. Third-party components retain the notices
 listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-The project code license is awaiting the owner's selection. This staging
-snapshot must not be advertised as an open-source release until that is set.
+Original project code is available under the [MIT license](LICENSE),
+copyright 2026 adonis-singh. The license does not cover game assets or
+third-party components with separate terms.

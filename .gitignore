@@ -1,7 +1,7 @@
 /build/
 /build-*/
-/third_party/
-/local/
+/third_party
+/local
 __pycache__/
 *.pyc
 *.log

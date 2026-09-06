@@ -836,6 +836,7 @@ def main() -> int:
     wall_inputs = current.result("wall_contact", "_inputs")
     wall_capture = current.result("wall_contact")
     scene = ROOT / f"viewer/scenes/{track_id}_mixed.json"
+    scene.parent.mkdir(parents=True, exist_ok=True)
     outputs = (
         track, route, vehicle, mixed_inputs, mixed_capture,
         wall_inputs, wall_capture, scene, PENDING_DIR / track_id,
