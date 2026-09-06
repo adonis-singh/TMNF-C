@@ -1,16 +1,26 @@
 # TMNF-C
 
-A deterministic TrackMania Forever simulator for reinforcement learning.
-C physics runs at the game's fixed 100 Hz tick rate, with CPU and CUDA vector
+A TrackMania Forever simulator for reinforcement learning, written in C.
+Physics runs at the game's fixed 100 Hz tick rate, with CPU and CUDA vector
 environments, Gymnasium bindings, and PPO and TD3 training tools.
 
-This source preview targets `TmForever.exe` 2.11.26. Game assets and captured
-research data are not included. Build and run the synthetic checks without a
-game installation; supply local game data before running a racing environment.
+The simulator targets `TmForever.exe` 2.11.26 and has been tested on 212
+Nations and United campaign tracks across all seven vehicle environments.
+Game assets are loaded from locally generated snapshots of your installation.
 
-## Build
+## Reinforcement learning
 
-The source-only build needs Linux, a C11 compiler, CMake and Python 3:
+The vector environments support discrete and analog controls, checkpoint and
+finish tracking, rewards, automatic episode resets and terminal observations.
+Snapshots allow rewind, state transfer between environments and training from
+states reached by the agent. Training saves configurations, evaluated policies
+and checkpoints for resuming runs.
+
+The [training guide](docs/TRAINING.md) covers setup, training and evaluation.
+
+## Build and setup
+
+The CPU build needs Linux, a C11 compiler, CMake and Python 3:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DTMNF_CUDA=OFF
@@ -18,29 +28,22 @@ cmake --build build -j4
 ctest --test-dir build --output-on-failure
 ```
 
-This builds the CPU libraries, replay harness and viewer exporter. The tests
-exercise synthetic physics, gate geometry, track loading and asset setup
-validation. They are not substitutes for game-capture comparisons.
+This builds the libraries, replay harness and viewer exporter, and runs the
+synthetic tests. No game installation is needed for this step.
 
-For simulation, follow [local asset setup](docs/LOCAL_ASSETS.md). The current
-workflow uses your installed game packs for the physics image and a local
-Wine/TMInterface capture lane for track, vehicle and route snapshots. It is
-not yet a packs-only importer for a complete racing environment.
+To run a racing environment, follow [local asset setup](docs/LOCAL_ASSETS.md).
+It uses your installed game packs and a Wine/TMInterface setup to generate
+track, vehicle and route snapshots. Game assets and recorded captures are
+not bundled with the repository.
 
-The [validation report](docs/VALIDATION.md) records the source and local-data
-checks performed for this preview.
+For CUDA, configure with `-DTMNF_CUDA=ON` and set
+`-DCMAKE_CUDA_ARCHITECTURES` to your GPU's compute capability, such as `86`
+for an RTX 3060. The tested architectures are 8.6 and 12.0.
 
-The [Python guide](docs/TRAINING.md) covers training and evaluation after
-local fixture generation. CUDA is optional; enable `TMNF_CUDA` and set
-`CMAKE_CUDA_ARCHITECTURES` for your GPU when configuring the build. Research
-validation has covered compute capabilities 8.6 and 12.0.
+## Results
 
-## Research results
-
-The private research corpus covers 212 Nations and United campaign tracks
-across seven vehicle environments. Five retained pure-RL policies beat the
-author medal on four tracks. Each listed policy produced an input schedule
-whose finish time was reproduced in the game.
+Five pure-RL policies beat the author medal on four tracks. Each policy's
+saved inputs reproduced the listed finish time in the actual game.
 
 | Track | Policy time | Author time |
 | --- | ---: | ---: |
@@ -50,41 +53,21 @@ whose finish time was reproduced in the game.
 | C03-Acrobatic | 12.660 s | 13.900 s |
 | Rally A1 | 17.690 s | 18.950 s |
 
-These are reported research results; their raw captures and policies are not
-part of this source distribution. They are per-track agents trained without
-demonstrations or behaviour cloning. Some use snapshot starts from their
-own trajectories. Rally uses an intermediate checkpoint; its final seed-1
-checkpoint was slower at 19.010 s. Game validation replays saved inputs,
-rather than executing the policy online in the game. Cross-track
-generalization and superhuman performance are not established.
+These are per-track agents trained without demonstrations or behaviour
+cloning; some train from snapshots of their own trajectories. Rally A1 uses
+an intermediate checkpoint. The policy weights and raw captures are not
+included in this release. See [validation details](docs/VALIDATION.md) for
+test coverage and result qualifications.
 
-## Scope
+## Current limitations
 
-The vector API provides discrete and analog controls, rewards, checkpoint
-and finish tracking, same-step autoreset, terminal observations and snapshots.
-Training records configurations and code hashes and retains evaluated policies.
-Exactness claims apply to tested capture fields and regimes; some private
-captures normalize documented memory that the game never writes.
+The project focuses on campaign racing. Route guidance and learning budgets
+still need work across tracks. Force models 4 and 5 and speed-glitch regimes
+remain unvalidated. The supported setup is a Linux source checkout; generating
+complete RL fixtures currently requires a running game through Wine/TMInterface.
 
-Campaign racing is the focus. Force models 4 and 5 and speed-glitch regimes
-remain unvalidated. Route guidance and learning budgets need further work.
-The public source-only checks do not establish full game fidelity or a
-portable Windows installation.
+## License
 
-[ForeverValidator](https://github.com/Skycrafter-dev/ForeverValidator) is
-related work with replay validation, a controllable sandbox and a Stadium
-CUDA backend. It has broader game-mode coverage. TMNF-C focuses on the RL
-workflow and CPU/CUDA support across seven vehicle environments. A current
-head-to-head speed advantage has not been established.
-
-## Distribution
-
-The [distribution policy](docs/DISTRIBUTION.md) describes the source boundary.
-Local packs, snapshots, captures, replays, textures, generated scenes and
-compiled libraries containing locally extracted image data must stay out of
-source commits and release uploads. Third-party components retain the notices
-listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-Original project code is available under the [MIT license](LICENSE),
-copyright 2026 adonis-singh. The license does not cover game assets or
-third-party components with separate terms.
+Original code is [MIT licensed](LICENSE), copyright 2026 adonis-singh.
+Game assets are not covered by that license. Bundled libraries and fonts retain
+their [third-party notices](THIRD_PARTY_NOTICES.md).

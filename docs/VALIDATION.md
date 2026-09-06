@@ -35,3 +35,12 @@ with finite rewards and exact reward continuation after snapshot restore.
 This validates one fresh import from a configured lane, not a clean-machine
 installer or every campaign track's route quality. Visual extraction was not
 part of this final headless import check.
+
+## Policy results
+
+The README reports per-track policies evaluated from the official start.
+Game validation replays their saved input schedules; it does not execute the
+policy online in the game. The Rally A1 result uses an intermediate checkpoint
+at 17.690 seconds. Its final seed-1 checkpoint was slower at 19.010 seconds.
+These results do not establish cross-track generalization or training success
+across seeds. Policy weights and raw captures remain outside this source release.
