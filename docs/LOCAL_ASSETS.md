@@ -84,7 +84,9 @@ A reported divergence is a failed comparison, not a successful fidelity check.
 
 This remains a research setup, not a one-command installer. The standalone
 source build and physics-image extraction have separate validation from
-complete capture-lane setup. Do not infer clean-machine capture support from
+capture-lane setup. A04 import has been checked from an existing configured
+lane with no saved vehicle fixture; initial setup on a clean machine has
+not been validated end to end. Do not infer clean-machine capture support from
 a passing synthetic test suite.
 
 ## Offline geometry and visuals
