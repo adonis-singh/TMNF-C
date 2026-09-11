@@ -41,6 +41,13 @@ class TrainConfig:
     encoder_version: int = 1
     arch: str = "mlp"
     hidden_size: int = 256
+    # --arch connectome: the MaleCNS v1.0 fruit fly graph as the policy trunk
+    # (tmnf_rl.connectome; built by tools/build_connectome_graph.py). The
+    # wiring is fixed; channels per neuron and synaptic propagation rounds
+    # per decision size the compute.
+    connectome_graph: str = "local/malecns/graph_minw5.npz"
+    connectome_channels: int = 8
+    connectome_rounds: int = 3
     # Linear learning-rate warm-up over this many updates; 0 = none.
     lr_warmup_updates: int = 0
     # Zero derives the budget from route length, laps and reference speed.
@@ -133,8 +140,12 @@ class TrainConfig:
     def validate(self) -> None:
         if self.action_space not in ("discrete", "analog"):
             raise ConfigError("action_space must be discrete or analog")
-        if self.arch not in ("mlp", "transformer_s"):
-            raise ConfigError("arch must be mlp or transformer_s")
+        if self.arch not in ("mlp", "transformer_s", "connectome"):
+            raise ConfigError("arch must be mlp, transformer_s or connectome")
+        if self.connectome_channels <= 0 or self.connectome_rounds <= 0:
+            raise ConfigError("connectome_channels and connectome_rounds must be positive")
+        if self.arch == "connectome" and self.algorithm == "td3":
+            raise ConfigError("the connectome trunk is implemented for the PPO agent")
         if self.hidden_size <= 0 or self.lr_warmup_updates < 0:
             raise ConfigError("hidden_size must be positive and lr_warmup_updates non-negative")
         if self.ent_coef <= 0.0:
@@ -303,7 +314,7 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
             )
         elif field.name == "arch":
             parser.add_argument(
-                option, dest=field.name, choices=("mlp", "transformer_s"),
+                option, dest=field.name, choices=("mlp", "transformer_s", "connectome"),
                 default=argparse.SUPPRESS,
             )
         else:

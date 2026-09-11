@@ -58,6 +58,7 @@ from tmnf_rl.encoder import (
     encode,
     flatten,
 )
+from tmnf_rl.connectome import ConnectomeTrunk
 from tmnf_rl.cuda_env import TmnfCudaVectorEnv
 from tmnf_rl.env import FINISH_REASON, POLICY_TRANSITION_WIDTH, TmnfVectorEnv
 from tmnf_rl.exploration import (
@@ -184,7 +185,7 @@ def layer_init(
     return layer
 
 
-ARCHITECTURES = ("mlp", "transformer_s")
+ARCHITECTURES = ("mlp", "transformer_s", "connectome")
 ACTION_COUNT = 12
 
 
@@ -310,11 +311,19 @@ class TransformerTrunk(nn.Module):
         return self.norm_out(x[:, 0])
 
 
-def build_trunk(arch: str, hidden_size: int, encoder_version: int = 1) -> nn.Module:
+def build_trunk(arch: str, hidden_size: int, encoder_version: int = 1,
+                connectome: dict[str, Any] | None = None) -> nn.Module:
     if arch == "mlp":
         return MlpTrunk(hidden_size, encoder_version)
     if arch == "transformer_s":
         return TransformerTrunk(**TRANSFORMER_S, encoder_version=encoder_version)
+    if arch == "connectome":
+        if connectome is None:
+            raise ValueError("the connectome trunk needs its graph options (connectome_options)")
+        return ConnectomeTrunk(
+            connectome["graph"], flat_features(encoder_version), hidden_size,
+            channels=connectome["channels"], rounds=connectome["rounds"],
+        )
     raise ValueError(f"arch must be one of {ARCHITECTURES}, got {arch!r}")
 
 
@@ -329,7 +338,8 @@ class Agent(nn.Module):
     distance (`encoder.critic_context`); the policy head does not.
     """
 
-    def __init__(self, arch: str, hidden_size: int, action_space: str = "discrete", *, cuda_graphs: bool = True, encoder_version: int = 1) -> None:
+    def __init__(self, arch: str, hidden_size: int, action_space: str = "discrete", *, cuda_graphs: bool = True,
+                 encoder_version: int = 1, connectome: dict[str, Any] | None = None) -> None:
         super().__init__()
         if action_space not in {"discrete", "analog"}:
             raise ValueError("action_space must be discrete or analog")
@@ -337,7 +347,7 @@ class Agent(nn.Module):
         self.action_space = action_space
         self.encoder_version = encoder_version
         self._flat_encoder = FlatEncoder(cuda_graphs=cuda_graphs, version=encoder_version)
-        self.trunk = build_trunk(arch, hidden_size, encoder_version)
+        self.trunk = build_trunk(arch, hidden_size, encoder_version, connectome)
         width = self.trunk.width
         # torch.compile keeps the parameters on the plain module (state_dict
         # keys stay unprefixed); the compiled callable is not a submodule.
@@ -355,6 +365,8 @@ class Agent(nn.Module):
     def hidden(self, observation: torch.Tensor) -> torch.Tensor:
         if self.arch == "mlp":
             return self.trunk.network(self._flat_encoder(observation))
+        if self.arch == "connectome":
+            return self.trunk(self._flat_encoder(observation))
         return self._trunk_forward(encode(observation, self.encoder_version))
 
     def value(self, hidden: torch.Tensor, observation: torch.Tensor) -> torch.Tensor:
@@ -450,6 +462,14 @@ class Agent(nn.Module):
             entropy,
             self.value(hidden, observation),
         )
+
+
+def connectome_options(config: TrainConfig) -> dict[str, Any] | None:
+    """Graph options for the connectome trunk, None for the other trunks."""
+    if config.arch != "connectome":
+        return None
+    return {"graph": config.connectome_graph, "channels": config.connectome_channels,
+            "rounds": config.connectome_rounds}
 
 
 def count_parameters(module: nn.Module) -> int:
@@ -743,7 +763,7 @@ class PPOTrainer:
         self.script_start = script_start
         args = config
 
-        self.agent = Agent(args.arch, args.hidden_size, args.action_space, encoder_version=config.encoder_version).to(device)
+        self.agent = Agent(args.arch, args.hidden_size, args.action_space, encoder_version=config.encoder_version, connectome=connectome_options(config)).to(device)
         self.optimizer = optim.Adam(
             self.agent.parameters(), lr=args.learning_rate, eps=1e-5
         )
@@ -756,7 +776,7 @@ class PPOTrainer:
         self.entropy_window = parse_window(args.entropy_boost_window) if args.entropy_boost_window else None
         self.ema_agent: Agent | None = None
         if args.ema_decay > 0.0:
-            self.ema_agent = Agent(args.arch, args.hidden_size, args.action_space, encoder_version=config.encoder_version).to(device)
+            self.ema_agent = Agent(args.arch, args.hidden_size, args.action_space, encoder_version=config.encoder_version, connectome=connectome_options(config)).to(device)
             self.ema_agent.load_state_dict(self.agent.state_dict())
             self.ema_agent.eval()
             for parameter in self.ema_agent.parameters():

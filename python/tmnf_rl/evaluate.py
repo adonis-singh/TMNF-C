@@ -21,7 +21,7 @@ require_single_gpu_env()
 import torch  # noqa: E402
 
 from tmnf_rl import provenance  # noqa: E402
-from tmnf_rl.agents.ppo import Agent, make_env, select_device  # noqa: E402
+from tmnf_rl.agents.ppo import Agent, connectome_options, make_env, select_device  # noqa: E402
 from tmnf_rl.agents.td3 import OffPolicyAgent  # noqa: E402
 from tmnf_rl.config import config_from_dict  # noqa: E402
 from tmnf_rl.evaluation import evaluate_full_start, replay_schedule  # noqa: E402
@@ -67,7 +67,8 @@ def load_policy(path: Path, device: torch.device) -> tuple[Any, dict[str, Any], 
             *state["summary"]["return_support"], config.td3_exploration_std, config.td3_pedal_epsilon, config.encoder_version,
         ).to(device)
     else:
-        agent = Agent(config.arch, config.hidden_size, config.action_space, encoder_version=config.encoder_version).to(device)
+        agent = Agent(config.arch, config.hidden_size, config.action_space, encoder_version=config.encoder_version,
+                      connectome=connectome_options(config)).to(device)
     agent.load_state_dict(state["agent"])
     agent.eval()
     meta = {
