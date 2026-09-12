@@ -18,6 +18,15 @@ and checkpoints for resuming runs.
 
 The [training guide](docs/TRAINING.md) covers setup, training and evaluation.
 
+## A fruit fly brain at the wheel
+
+[`python/tmnf_fly`](python/tmnf_fly/README.md) wires the MaleCNS v1.0
+*Drosophila* connectome into the simulator: the fly's mushroom body, with its
+real PN-KC-MBON synapses, learns a track by dopamine reward-prediction error
+(no gradients), and a measured compound eye plus the connectome's optic lobe
+and descending neurons give the fly's-eye view and a reflex driver. Training
+statistics and the reproduction steps are in that README.
+
 ## Build and setup
 
 The CPU build needs Linux, a C11 compiler, CMake and Python 3:

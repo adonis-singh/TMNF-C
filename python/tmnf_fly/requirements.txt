@@ -1,0 +1,22 @@
+# tmnf_fly: install on top of the repository's requirements.txt (tmnf_rl: gymnasium, torch, numpy)
+#   uv pip install --python build/venv/bin/python -r requirements.txt -r python/tmnf_fly/requirements.txt
+# Python 3.12, CUDA GPU (torch, flyvis). Versions are the ones the published results were produced with.
+# Not on PyPI: fly_view needs Node >= 22 (`node` on PATH; fly_view.mjs uses the standard library only)
+# and Chromium (--chrome, default /usr/bin/chromium) for the headless WebGL game-view capture, and
+# brain_render/video need an OpenGL context for VTK offscreen rendering (EGL/GLX).
+numpy==2.5.2
+scipy==1.18.1
+pandas==3.0.5
+pyarrow==25.0.1
+torch==2.13.0
+flyvis==1.2.0
+rdata==1.1.0
+xarray==2026.7.0
+trimesh==5.1.0
+embreex==4.4.0
+pyvista==0.49.0
+vtk==9.7.0
+matplotlib==3.11.1
+pillow==12.3.0
+imageio==2.37.4
+imageio-ffmpeg==0.6.0
