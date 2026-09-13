@@ -25,8 +25,10 @@ see the [main README](../../README.md) and [local asset setup](../../docs/LOCAL_
 Laps driven by the mushroom body after 5, 30 and 60 minutes of training
 (A04-Acrobatic 6.58 s and 6.29 s, A02-Race 21.69 s), composed by `video.py`:
 game chase view, the fly's compound-eye view, the MaleCNS skeletons coloured
-by activity, the track map and MBON value / dopamine / LC4 traces. The videos
-and trained weights are release assets, not repository files.
+by activity, the track map and MBON value / dopamine / LC4 traces. The videos,
+trained weights, per-decision circuit activity and training logs are in the
+[fly-v1 release](https://github.com/adonis-singh/TMNF-C/releases/tag/fly-v1),
+not in the repository.
 
 ## The mushroom body learner
 
