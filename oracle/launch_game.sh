@@ -24,7 +24,7 @@ if [[ ! -f "$CHALLENGE" ]]; then
 fi
 
 export WINEPREFIX="$PREFIX"
-export WINEDEBUG=-all
+export WINEDEBUG="${TMNF_WINEDEBUG:--all}"
 export LIBGL_ALWAYS_SOFTWARE=1
 export GALLIUM_DRIVER=llvmpipe
 mkdir -p "$TRACE_DIR"
@@ -39,14 +39,21 @@ TMNF_ROUTE_PATH="Z:${ROUTE_DIR//\//\\}\\$TRACK_NAME.tmnfroute"
 export TMNF_TRACK_SHA256
 TMNF_TRACK_SHA256="$(sha256sum "$CHALLENGE" | cut -d' ' -f1)"
 
-exec xvfb-run -n "$DISPLAY_NUMBER" -s "-screen 0 1024x768x24" bash -c '
+exec xvfb-run -e /dev/stderr -n "$DISPLAY_NUMBER" -s "-screen 0 1024x768x24" bash -c '
     set -euo pipefail
     cd "${1%/*}"
     wine "$1" run TmForever default "/configstring=set custom_port $2" &
 
-    for _ in {1..60}; do
+    for attempt in {1..60}; do
         if ss -ltn | rg -q "127\.0\.0\.1:$2 "; then
             break
+        fi
+        # Some profiles initialize Python_Link only on first showing the UI.
+        # Waiting for its port before sending this key can otherwise deadlock.
+        # All keys target the private lane display; close the UI below once
+        # the socket is ready. Retry while the game window is still starting.
+        if (( attempt % 3 == 0 )); then
+            python3 "$3" --window "TrackMania Modded Forever" --key grave || true
         fi
         sleep 1
     done

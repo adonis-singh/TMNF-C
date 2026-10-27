@@ -8,7 +8,7 @@ import base64
 from dataclasses import dataclass, field
 
 import fp
-from assets import Assets, BLOCK_TYPES, BuildError, Remap, Tree
+from assets import Assets, BLOCK_TYPES, BuildError, MissingBlockInfoError, Remap, Tree
 
 FLAT, FRONTIER, CLASSIC, ROAD, CLIP, PYLON = 0, 1, 2, 3, 4, 7
 
@@ -100,6 +100,29 @@ def iter_tree(tree: Tree):
     yield tree
     for child in tree.children:
         yield from iter_tree(child)
+
+
+def fixed_stadium_flag_corpora(assets: Assets, decoration: dict):
+    """Collision meshes in Stadium's otherwise nonstatic Flags scene corpus.
+
+    The flag visuals animate; their collision meshes and placements are fixed.
+    Native physics must retain those surfaces even though a static-only game
+    snapshot omits the corpus. Other nonstatic colliders need an explicit port.
+    """
+    result = []
+    scene = decoration['decoSizeNode']['sceneNode']
+    for entry, location in zip(scene['mobils'], scene['locations']):
+        mobil = entry['mobil']
+        if mobil is None or mobil['itemFlags'] & (1 << 19):
+            continue
+        root = assets.mobil_tree(mobil, f"decoration {mobil['name']!r}")
+        if not root.flags & 0x80 or not any(tree.surface for tree in iter_tree(root)):
+            continue
+        if mobil['name'] != 'Flags':
+            raise BuildError(f"nonstatic decoration collider {mobil['name']!r} is not supported")
+        result.append((Mobil(root, True, 'fixed Stadium flag collisions'),
+                       fp.iso_from_bytes(base64.b64decode(location['location']))))
+    return result
 
 
 def path_to(root: Tree, target: Tree) -> list:
@@ -208,10 +231,13 @@ def get_mobil(info: dict, ground: bool, variant: int, sub_variant: int) -> dict 
 
 
 class Challenge:
-    def __init__(self, assets: Assets, challenge: dict, quality: str = "low"):
+    def __init__(self, assets: Assets, challenge: dict, quality: str = "low",
+                 allow_ground_mismatch: bool = False, allow_missing_blocks: bool = False):
         self.assets = assets
         self.doc = challenge
         self.quality = SOLID_QUALITY[quality]
+        self.allow_ground_mismatch = allow_ground_mismatch
+        self.allow_missing_blocks = allow_missing_blocks
         coll = assets.collection(challenge["collection"])
         self.collection = coll
         self.square = float(coll["squareSize"])
@@ -232,6 +258,10 @@ class Challenge:
         self.zone_height: dict[tuple, int] = {}
         self.blocks: list[Block] = []
         self.add_list: list[Block] = []
+        # UpdateFieldUnits reuses two offset temporaries across block loads.
+        # Cardinal directions overwrite them; saved direction-4 clips do not.
+        self._field_bounds_xz = None
+        self._field_unit_xz = None
 
     # -- play field ---------------------------------------------------------
     def editable(self, coord) -> bool:
@@ -305,8 +335,18 @@ class Challenge:
     # -- InitChallengeData --------------------------------------------------
     def init(self) -> None:
         """CGameCtnChallenge::InitChallengeData (0x005AA2C0)."""
+        self.missing_blocks = []
         for raw in self.doc["blocks"]:
-            info = self.assets.block_info(raw["name"])
+            try:
+                info = self.assets.block_info(raw["name"])
+            except MissingBlockInfoError:
+                if not self.allow_missing_blocks:
+                    raise
+                # Replay validation discards blocks whose block-info pointer
+                # is null: UpdateFieldUnits returns false at 0x005A5215.
+                # Retain authored indices for the remaining race waypoints.
+                self.missing_blocks.append({'index': raw['index'], 'name': raw['name']})
+                continue
             self.blocks.append(Block(raw["index"], raw["name"], tuple(raw["coord"]),
                                      raw["direction"], raw["flags"], info))
         # Pass 1: terrain blocks fix their height and stamp the column zone.
@@ -340,7 +380,11 @@ class Challenge:
             b = self.blocks[i]
             if b.type not in (FLAT, FRONTIER):
                 if not self.update_field_units(b):
-                    raise BuildError(f"block rejected by UpdateFieldUnits: {b}")
+                    # InitChallengeData removes this one block from the active
+                    # vector with stable erase (0x0060CC30), then revisits the
+                    # same index. Block.index keeps its authored identity.
+                    del self.blocks[i]
+                    continue
                 self.create_mobil_for_block(b)
                 self.add_list.append(b)
             i += 1
@@ -355,6 +399,85 @@ class Challenge:
             if modifier is not None and not self.is_terrain_modifier(b.info, b.ground):
                 b.terrain_modifier = modifier
                 self.create_mobil_for_block(b)
+        self.regenerate_clips()
+
+    def regenerate_clips(self) -> None:
+        """CGameCtnApp's scene-loading clip repair (0x005E6730).
+
+        InitChallengeData builds clips while later blocks can still replace
+        their neighbours. Before populating the scene, the game removes and
+        regenerates the original clip blocks against the completed field.
+        Newly appended clips are outside this original-count iteration.
+        """
+        index, remaining = 0, len(self.blocks)
+        while index < remaining:
+            block = self.blocks[index]
+            if block.type == CLIP:
+                self.regenerate_clip(block.coord)
+                remaining -= 1
+            else:
+                index += 1
+
+    def regenerate_clip(self, coord) -> bool:
+        """CGameCtnChallenge's remove/recreate operation (0x005AC970)."""
+        old = self.block_at(coord)
+        if old is not None and old.type != CLIP:
+            return False
+        zone = self.real_zone(coord)
+        if old is not None:
+            for unit in old.units:
+                field = self.field_unit(unit.coord)
+                if field is not None:
+                    field.unit = None
+                    if field.terrain == T_GROUND:
+                        # RemoveBlock (0x005A618F) restores the terrain
+                        # mobil hidden when this ground unit was placed.
+                        under = self.block_at((unit.coord[0], 0, unit.coord[2]))
+                        if under is not None:
+                            if all(block is not under for block in self.add_list):
+                                self.add_list.append(under)
+                            modifier = self.column_modifier(unit.coord)
+                            if modifier != under.terrain_modifier:
+                                under.terrain_modifier = modifier
+                                self.create_mobil_for_block(under)
+            self.blocks[:] = [block for block in self.blocks if block is not old]
+            self.add_list[:] = [block for block in self.add_list if block is not old]
+        ground = self.terrain_at(coord) == T_GROUND
+        basic_zone = self.zones[zone['childZoneId']] if 'blockInfoFrontier' in zone else zone
+        default = self.assets.block_info_at(
+            basic_zone['blockInfoClip'] or self.default_zone['blockInfoClip'])
+        connected = False
+        for direction in range(4):
+            unit = self.unit_at(neighbour(coord, direction))
+            clip = unit.clips[opposed(direction)] if unit is not None else None
+            if (clip is not None and clip['id'] != default['id'] and unit.block.type != ROAD
+                    and (get_mobil(default, ground, 0, 0) is not None
+                         or get_mobil(clip, ground, 0, 0) is not None)):
+                connected = True
+                break
+        if not connected:
+            return True
+        if 'blockInfoFrontier' in zone:
+            height = self.zone_height[(coord[0], coord[2])]
+            terrain = (self.terrain_at(coord) == T_TERRAIN
+                       and coord[1] <= height - zone['common']['depth'])
+            if not terrain and coord[1] <= height + 1:
+                return False
+        block = Block(-1, default['id'], coord, 0, 0xFC0 | (0x1000 if ground else 0), default)
+        self.blocks.append(block)
+        if not self.update_field_units(block):
+            self.blocks.pop()
+            return False
+        # CreateBlock (0x005A9E50) applies column skins to generated ground
+        # blocks too; these clips are added after InitChallengeData's pass.
+        if ground:
+            for unit in block.units:
+                modifier = self.column_modifier(unit.coord)
+                if modifier is not None:
+                    block.terrain_modifier = modifier
+        self.create_mobil_for_block(block)
+        self.add_list.append(block)
+        return True
 
     def check_terrain_block(self, b: Block) -> None:
         """CGameCtnChallenge::CheckTerrainBlock (0x005A2F80): frontier blocks
@@ -389,11 +512,13 @@ class Challenge:
             ground = self.is_block_on_ground(info, b.coord, b.direction)
             units = unit_infos(info, ground)
         for i in range(len(units)):
-            off = rotated_offset(info, i, b.direction, ground)
+            off = self._field_offset(b, i, ground, getattr(self, '_field_bounds_xz', None))
+            self._field_bounds_xz = (off[0], off[2])
             if not self.editable((b.coord[0] + off[0], b.coord[1] + off[1], b.coord[2] + off[2])):
                 return False
         if b.type in (FLAT, FRONTIER):
             x, y, z = b.coord
+            self._field_unit_xz = (x, z)
             for yy in range(y + 1):
                 fu = self.field_unit((x, yy, z))
                 if fu is None:
@@ -406,6 +531,7 @@ class Challenge:
             else:
                 fu.terrain = T_GROUND
             off = rotated_offset(info, 0, b.direction, ground)
+            self._field_bounds_xz = (off[0], off[2])
             fu = self.field_unit((x + off[0], 0, z + off[2]))
             unit = self.make_unit(b, units[0], (x + off[0], y + off[1], z + off[2]))
             fu.unit = unit
@@ -418,12 +544,20 @@ class Challenge:
                     fu = self.field_unit((x, yy, z))
                     fu.unit = self.make_unit(b, units[0], (x, yy, z))
             return True
-        if ground != b.ground:
+        if ground != b.ground and not self.allow_ground_mismatch:
             raise BuildError(f"{b}: file ground flag {b.ground} but IsBlockOnGround={ground}")
+        # UpdateFieldUnits (0x005A51E0) chooses units from the terrain test
+        # without rewriting the serialized ground flag. Mobil choice and
+        # GetMobilLoc still use that flag. TMX maps can exercise this split;
+        # keep the flag intact when the optional consistency check is relaxed.
         fresh = not b.units
         for i, ui in enumerate(units):
-            off = rotated_offset(info, i, b.direction, ground)
+            off = self._field_offset(b, i, ground, getattr(self, '_field_unit_xz', None))
+            self._field_unit_xz = (off[0], off[2])
             c = (b.coord[0] + off[0], b.coord[1] + off[1], b.coord[2] + off[2])
+            # The mutation loop writes its absolute X/Z into the same stack
+            # slots the next block's bounds loop uses for its offset.
+            self._field_bounds_xz = (c[0], c[2])
             fu = self.field_unit(c)
             if fu is None:
                 for yy in range(c[1] + 1):
@@ -438,6 +572,24 @@ class Challenge:
                 under = self.block_at((c[0], 0, c[2]))
                 self.remove_block(under)
         return True
+
+    @staticmethod
+    def _field_offset(b: Block, index: int, ground: bool, previous_xz) -> tuple:
+        """GetRotatedOffset's caller-owned scratch values for saved clips.
+
+        Direction 4 leaves X/Z unwritten (0x00661BA5). The bounds loop's
+        temporary at UpdateFieldUnits+0x44 retains the preceding unit's
+        absolute position (0x005A56A7); the mutation loop's +0x38 retains its
+        relative offset. Consequently these clips can pass or fail bounds
+        depending on the preceding block. Rejecting all of them loses real
+        colliders; treating them as West can add colliders the game rejects.
+        """
+        off = rotated_offset(b.info, index, b.direction, ground)
+        if b.type == CLIP and b.direction == 4:
+            if previous_xz is None:
+                raise BuildError(f'{b}: direction-4 clip without initialized field offsets')
+            return previous_xz[0], off[1], previous_xz[1]
+        return off
 
     def make_unit(self, b: Block, ui: dict, coord) -> Unit:
         """CGameCtnBlockUnit::CGameCtnBlockUnit (0x00700A90): unit clips are
@@ -528,7 +680,13 @@ class Challenge:
         mobil = get_mobil(info, b.ground, b.variant, b.sub_variant)
         if mobil is None:
             if b.type == PYLON:
-                raise BuildError(f"{b}: pylon blocks are not supported")
+                # CreateBlockMobil (0x0060C435) permits a null pylon mobil.
+                # Stadium's authored PylonStadium has empty ground/air rows
+                # and contributes no collision geometry. Nonempty pylon
+                # layouts need the additional +0xe0 fallback rule ported.
+                if any(row for rows in (info['groundMobils'], info['airMobils'])
+                       for row in (rows or [])):
+                    raise BuildError(f"{b}: nonempty pylon mobil fallback is not supported")
             mobil = get_mobil(info, not b.ground, b.variant, b.sub_variant)
         if mobil is None:
             b.mobil = None

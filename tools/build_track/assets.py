@@ -8,10 +8,12 @@ missing. All lookups go through `Assets`, which memoizes the parsed JSON.
 from __future__ import annotations
 
 import base64
+import atexit
 import json
 import os
 import subprocess
 import sys
+import threading
 from dataclasses import dataclass
 from functools import cached_property
 
@@ -74,17 +76,82 @@ class BuildError(Exception):
     pass
 
 
-def gbxdump(*args: str) -> None:
+class MissingBlockInfoError(BuildError):
+    """The installed block-info catalogue has no entry for this identifier."""
+
+
+def ensure_gbxdump() -> str:
     dotnet = find_dotnet()
     if dotnet is None:
         raise BuildError(f"dotnet not found: {DOTNET_INSTALL_HINT}")
-    if not os.path.exists(GBXDUMP_DLL):
+    sources = [os.path.join(HERE, 'GbxDump', name)
+               for name in ('Program.cs', 'GbxDump.csproj')]
+    sources.extend(os.path.join(HERE, name) for name in
+                   ('build_gbx_compat.py', 'gbx_legacy_clip.patch'))
+    if (not os.path.exists(GBXDUMP_DLL)
+            or any(os.path.getmtime(path) > os.path.getmtime(GBXDUMP_DLL) for path in sources)):
+        from build_gbx_compat import ensure_package
+        ensure_package(dotnet)
         subprocess.run(
             [dotnet, "build", "-c", "Release", os.path.join(HERE, "GbxDump")],
             check=True, stdout=sys.stderr)
+    return dotnet
+
+
+def gbxdump(*args: str) -> None:
+    dotnet = ensure_gbxdump()
     env = dict(os.environ, TMNF_CLASS_PARENTS=CLASS_PARENTS, TMNF_UNWRAP_CLASS_IDS=UNWRAP_CLASS_IDS,
                DOTNET_CLI_TELEMETRY_OPTOUT="1")
     subprocess.run([dotnet, GBXDUMP_DLL, *args], check=True, env=env, stdout=sys.stderr)
+
+
+class GbxBridge:
+    """One JSON-lines reader per worker, amortizing .NET startup across maps."""
+    def __init__(self):
+        self.process = None
+        self.identity = None
+        self.lock = threading.Lock()
+        atexit.register(self.close)
+
+    def close(self):
+        if self.process is not None:
+            process, self.process = self.process, None
+            process.stdin.close()
+            if self.identity[0] != os.getpid():
+                process.stdout.close()
+                return  # An inherited pipe never owns its parent's reader.
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.terminate()
+                process.wait()
+            process.stdout.close()
+
+    def request(self, command, path, **options):
+        with self.lock:
+            dotnet = ensure_gbxdump()
+            identity = (os.getpid(), os.stat(GBXDUMP_DLL).st_mtime_ns)
+            if self.process is not None and (identity != self.identity or self.process.poll() is not None):
+                self.close()
+            if self.process is None:
+                env = dict(os.environ, DOTNET_CLI_TELEMETRY_OPTOUT='1',
+                           TMNF_CLASS_PARENTS=CLASS_PARENTS, TMNF_UNWRAP_CLASS_IDS=UNWRAP_CLASS_IDS)
+                self.process = subprocess.Popen([dotnet, GBXDUMP_DLL, 'serve'],
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, env=env)
+                self.identity = identity
+            self.process.stdin.write(json.dumps({'command': command, 'input': str(path), **options}) + '\n')
+            self.process.stdin.flush()
+            response = self.process.stdout.readline()
+            if not response:
+                self.close()
+                raise BuildError('GBX bridge closed without a response')
+            result = json.loads(response)
+            if not result['ok']:
+                raise BuildError(f'{path}: {result["error"]}')
+            return result['result']
+
+
+BRIDGE = GbxBridge()
 
 
 def cache_dir_for(packs: str) -> str:
@@ -99,7 +166,55 @@ CACHE_VERSION = "3"
 
 def cache_complete(cache: str) -> bool:
     marker = os.path.join(cache, "json", ".complete")
-    return os.path.exists(marker) and open(marker).read() == CACHE_VERSION
+    if not os.path.exists(marker):
+        return False
+    with open(marker) as stream:
+        return stream.read() == CACHE_VERSION
+
+
+def verify_cache_packages(cache: str, packs: str) -> None:
+    """Keep an extracted cache paired with the game's available packages."""
+    if not os.path.isdir(packs):
+        return  # A standalone decrypted cache can be used without its paks.
+    available = {p.name[:-4]: p.path for p in os.scandir(packs)
+                 if p.is_file() and p.name.lower().endswith('.pak')}
+    cached = {p.name for p in os.scandir(cache) if p.is_dir() and p.name != 'json'
+              and not p.name.startswith('.')}
+    unavailable = cached - available.keys()
+    if unavailable:
+        raise BuildError('asset cache contains packages unavailable in the selected game: '
+                         + ', '.join(sorted(unavailable)) + '; use a cache extracted from the same packs')
+    for name in ('asset-pack-profile.json', 'capture-game-assets.json'):
+        manifest = os.path.join(cache, name)
+        if not os.path.exists(manifest):
+            continue
+        with open(manifest) as stream:
+            expected = json.load(stream)['packages_sha256']
+        if set(expected) != set(available):
+            raise BuildError('asset cache package set differs from the selected game')
+        import hashlib
+        for package, path in available.items():
+            digest = hashlib.sha256()
+            with open(path, 'rb') as stream:
+                for block in iter(lambda: stream.read(1024 * 1024), b''):
+                    digest.update(block)
+            if digest.hexdigest() != expected[package]:
+                raise BuildError(f'asset cache package hash differs from the selected game: {package}')
+        break
+
+
+def _package_hashes(packs: str) -> dict:
+    import hashlib
+    result = {}
+    for path in os.scandir(packs):
+        if not path.is_file() or not path.name.lower().endswith('.pak'):
+            continue
+        digest = hashlib.sha256()
+        with open(path.path, 'rb') as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b''):
+                digest.update(block)
+        result[path.name[:-4]] = digest.hexdigest()
+    return result
 
 
 def ensure_cache(cache: str, packs: str) -> None:
@@ -107,9 +222,11 @@ def ensure_cache(cache: str, packs: str) -> None:
     tree is complete and which dump format it holds; anything else is rebuilt
     from scratch."""
     if cache_complete(cache):
+        verify_cache_packages(cache, packs)
         return
     if not os.path.isdir(packs):
         raise BuildError(f"pak directory not found: {packs}")
+    package_hashes = _package_hashes(packs)
     os.makedirs(cache, exist_ok=True)
     candidates = os.path.join(cache, "candidates.txt")
     if not os.path.exists(candidates):
@@ -118,6 +235,13 @@ def ensure_cache(cache: str, packs: str) -> None:
     gbxdump("extract", packs, cache, candidates, *ASSET_SUFFIXES)
     print("build_track: dumping GBX files to JSON", file=sys.stderr)
     gbxdump("dump-tree", cache, os.path.join(cache, "json"), *ASSET_SUFFIXES)
+    if _package_hashes(packs) != package_hashes:
+        raise BuildError('game packages changed while building the asset cache')
+    manifest = os.path.join(cache, 'asset-pack-profile.json')
+    with open(manifest + '.partial', 'w') as stream:
+        json.dump(dict(packages_sha256=package_hashes), stream, sort_keys=True)
+        stream.write('\n')
+    os.replace(manifest + '.partial', manifest)
     with open(os.path.join(cache, "json", ".complete"), "w") as fh:
         fh.write(CACHE_VERSION)
 
@@ -190,6 +314,12 @@ class Assets:
         self._trees: dict[tuple, Tree] = {}
         self._surfaces: dict[tuple, Surface] = {}
         self._remaps: dict[str, Remap] = {}
+        # ``find`` is called during every challenge initialization.  The
+        # extracted cache is immutable for the lifetime of Assets, so retain
+        # each suffix lookup instead of walking the complete JSON tree again.
+        # Keep the complete match tuple (rather than only the successful path)
+        # so duplicate-asset diagnostics remain unchanged.
+        self._find_matches: dict[str, tuple[str, ...]] = {}
 
     # -- raw JSON -----------------------------------------------------------
     def rel(self, path: str) -> str:
@@ -224,12 +354,16 @@ class Assets:
 
     def find(self, suffix: str) -> str:
         """Locate a single GBX in the cache by path suffix."""
-        matches = []
-        for root, _, files in os.walk(self.json_root):
-            for name in files:
-                full = os.path.join(root, name)
-                if full.endswith(suffix + ".json"):
-                    matches.append(full)
+        matches = self._find_matches.get(suffix)
+        if matches is None:
+            found = []
+            for root, _, files in os.walk(self.json_root):
+                for name in files:
+                    full = os.path.join(root, name)
+                    if full.endswith(suffix + ".json"):
+                        found.append(full)
+            matches = tuple(found)
+            self._find_matches[suffix] = matches
         if len(matches) != 1:
             raise BuildError(f"{suffix}: {len(matches)} matches in {self.json_root}")
         rel = os.path.relpath(matches[0], self.json_root)[:-5]
@@ -261,7 +395,7 @@ class Assets:
     def block_info(self, ident: str) -> dict:
         path = self.block_info_index.get(ident)
         if path is None:
-            raise BuildError(f"unknown block {ident}")
+            raise MissingBlockInfoError(f"unknown block {ident}")
         info = self.load(path)
         info["_path"] = self.rel(path)
         return info
@@ -322,7 +456,14 @@ class Assets:
         that was active while the solid loaded."""
         target = self.remapped_material(material, remap)
         if target is None:
-            return material["materialSurfaceId"]
+            value = material["materialSurfaceId"]
+            if value is None:
+                # Older CPlugSurface slots encode the physics ID directly,
+                # without a CPlugMaterial file for GetMaterial to resolve.
+                value = material.get("surfaceIdValue")
+            if value is None:
+                raise BuildError(f"surface material has no resolved or inline physics ID: {material}")
+            return value
         return self.load(target)["surfaceId"]
 
     def effective_remap(self, tree: dict, remap: Remap | None) -> Remap | None:

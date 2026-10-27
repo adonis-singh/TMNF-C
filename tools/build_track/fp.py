@@ -151,5 +151,9 @@ def mobil_loc(coord: tuple, direction: int, size: tuple, square: float, height: 
         tz = add(mul(float(sx), square), tz)
         rot = rotate_quarter_y(1)
     else:
-        raise ValueError(f"bad direction {direction}")
+        # GetMobilLoc's default branch (0x0060ADDE) reuses the stack word
+        # containing float32 z translation as the quarter-turn argument.
+        # Preserve this game quirk instead of wrapping the invalid direction.
+        quarter = struct.unpack('<I', struct.pack('<f', tz))[0]
+        rot = rotate_quarter_y(quarter)
     return rot + (tx, ty, tz)

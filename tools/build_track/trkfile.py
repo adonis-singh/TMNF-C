@@ -16,6 +16,7 @@ VERSION = 3
 HEADER_SIZE = 0x150
 SECTION_COUNT = 12
 PAYLOAD_SHA256 = 0x60 + SECTION_COUNT * 16      # 0x120
+FIXED_DECORATION_MARKER = b'TMNF-FIXED-DECO\0'  # reserved header bytes 0x140..0x150
 EXE_SHA256 = bytes.fromhex(
     "3847cf9f20bfc63914450060ed528c12104f743d96ad23d6e76abd178de8c84f")
 STRIDES = [0x60, 0x18, 0x38, 0x0C, 0x20, 0x20, 1, 8, 0x14, 0x30, 0x28, 1]
@@ -98,6 +99,7 @@ class Track:
     corpus_isos: list[bytes] = field(default_factory=list)   # index = corpus id - 1
     water: Water | None = None
     track_sha256: bytes = b"\0" * 32
+    fixed_decoration_collisions: bool = False
 
     def payload(self) -> bytes:
         return build_image(self)[HEADER_SIZE:]
@@ -113,6 +115,7 @@ def load(path: str) -> Track:
     secs = [struct.unpack_from("<QII", d, 0x60 + i * 16) for i in range(SECTION_COUNT)]
     t = Track()
     t.track_sha256 = d[0x40:0x60]
+    t.fixed_decoration_collisions = d[0x140:0x150] == FIXED_DECORATION_MARKER
     so, sc, ss = secs[1]
     mo, mc, ms = secs[2]
     eo, ec, es = secs[0]
@@ -229,6 +232,8 @@ def build_image(t: Track) -> bytearray:
     for i, (offset, count, stride) in enumerate(zip(offsets, counts, STRIDES)):
         struct.pack_into("<QII", image, 0x60 + i * 16, offset, count, stride)
     image[PAYLOAD_SHA256:PAYLOAD_SHA256 + 32] = hashlib.sha256(image[HEADER_SIZE:]).digest()
+    if t.fixed_decoration_collisions:
+        image[0x140:0x150] = FIXED_DECORATION_MARKER
     return image
 
 
@@ -260,7 +265,8 @@ def canonicalize(t: Track) -> Track:
               for m in t.meshes]
     out = Track(surfaces=t.surfaces, meshes=meshes, material_data=t.material_data,
                 collision_pairs=t.collision_pairs, water=t.water,
-                track_sha256=t.track_sha256)
+                track_sha256=t.track_sha256,
+                fixed_decoration_collisions=t.fixed_decoration_collisions)
     tree_ids: dict[int, int] = {}
     corpus_ids: dict[int, int] = {}
     isos: list[bytes] = []

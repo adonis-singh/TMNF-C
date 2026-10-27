@@ -13,7 +13,7 @@ BLOCKED_DIRS = ('local/', 'artifacts/', 'research/', 'analysis/', 'third_party/'
                 'oracle/traces/', 'oracle/replays/', 'oracle/ghosts/', 'oracle/wineprefix')
 BLOCKED_EXTENSIONS = {'.pak', '.gbx', '.exe', '.dll', '.asi', '.bin', '.pt', '.pth',
                       '.tga', '.dds', '.png', '.jpg', '.gltf', '.glb',
-                      '.tmnftrack', '.tmnfvehicle', '.tmnfroute'}
+                      '.tmnftrack', '.tmnfvehicle', '.tmnfroute', '.tmnftriggers'}
 MASK_HASH = '6dac49cc6f6b02b3c9684a987dd32d507b9dda63f463665745d24113c4c01e70'
 
 

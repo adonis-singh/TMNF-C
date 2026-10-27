@@ -1,0 +1,25 @@
+--- a/Src/GBX.NET/Engines/Game/CGameCtnChallenge.cs
++++ b/Src/GBX.NET/Engines/Game/CGameCtnChallenge.cs
+@@ -1324,6 +1324,22 @@
+ 
+                 n.blocks.Add(block);
+             }
++
++            // Some legacy TMF maps omit the final block's flags. The game
++            // consumes the MediaTracker chunk ID as flags, then tolerates its
++            // three null references. Keep those exact block flags and recover
++            // only this complete signature, without ignoring other chunks.
++            var lastBlock = n.blocks.LastOrDefault();
++            if (Version == 1 && lastBlock?.Flags == 0x03043021
++                && r.BaseStream.Length - r.BaseStream.Position >= 16)
++            {
++                var position = r.BaseStream.Position;
++                var legacyNullReferences = r.ReadUInt32() == uint.MaxValue
++                    && r.ReadUInt32() == uint.MaxValue
++                    && r.ReadUInt32() == uint.MaxValue
++                    && r.ReadUInt32() == 0x03043022;
++                r.BaseStream.Position = legacyNullReferences ? position + 12 : position;
++            }
+         }
+ 
+         public override void Write(CGameCtnChallenge n, GbxWriter w)

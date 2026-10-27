@@ -37,6 +37,38 @@ switch (args[0])
         }
         DumpTree(args[1], args[2], args[3..]);
         break;
+    case "replay-info":
+        if (args.Length != 2) Fail("usage: replay-info INPUT.Replay.Gbx");
+        Console.WriteLine(JsonSerializer.Serialize(ReplayInfo(args[1])));
+        break;
+    case "serve":
+        string? line;
+        while ((line = Console.ReadLine()) is not null)
+        {
+            try
+            {
+                using var request = JsonDocument.Parse(line);
+                var root = request.RootElement;
+                var input = root.GetProperty("input").GetString()
+                    ?? throw new InvalidDataException("missing input");
+                object? result = null;
+                switch (root.GetProperty("command").GetString())
+                {
+                    case "dump":
+                        Dump(input, root.GetProperty("output").GetString()
+                            ?? throw new InvalidDataException("missing output"));
+                        break;
+                    case "replay-info": result = ReplayInfo(input); break;
+                    default: throw new InvalidDataException("unknown bridge command");
+                }
+                Console.WriteLine(JsonSerializer.Serialize(new { ok = true, result }));
+            }
+            catch (Exception error)
+            {
+                Console.WriteLine(JsonSerializer.Serialize(new { ok = false, error = error.Message }));
+            }
+        }
+        break;
     case "extract":
         if (args.Length < 4)
         {
@@ -75,6 +107,19 @@ switch (args[0])
 }
 
 static GbxReadSettings Settings() => new() { SafeSkippableChunks = true };
+
+static object? ReplayInfo(string input)
+{
+    var replay = Gbx.ParseNode<CGameCtnReplayRecord>(input, Settings());
+    return replay.Ghosts?.Select(ghost => new
+    {
+        validationSeed = ghost.Validate_ValidationSeed,
+        raceTime = ghost.RaceTime?.TotalMilliseconds,
+        gameVersion = ghost.Validate_ExeVersion,
+        raceSettings = ghost.Validate_RaceSettings,
+        isLapRace = replay.Challenge?.IsLapRace,
+    }).ToArray();
+}
 
 static void DumpTree(string inputRoot, string outputRoot, string[] suffixes)
 {
@@ -162,6 +207,8 @@ static object SerializeChallenge(CGameCtnChallenge map)
         },
         size = new[] { map.Size.X, map.Size.Y, map.Size.Z },
         needUnlock = map.NeedUnlock,
+        isLapRace = map.IsLapRace,
+        nbLaps = map.NbLaps,
         blocks
     };
 }
@@ -690,7 +737,9 @@ static void WriteJson(string output, object value)
     var options = new JsonSerializerOptions
     {
         WriteIndented = false,
-        DefaultIgnoreCondition = JsonIgnoreCondition.Never
+        DefaultIgnoreCondition = JsonIgnoreCondition.Never,
+        // Visual mip far planes can be infinite; geometry remains encoded as bytes.
+        NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals
     };
     File.WriteAllText(output, JsonSerializer.Serialize(value, options) + "\n");
 }

@@ -26,8 +26,8 @@ import bvh  # noqa: E402
 import fp  # noqa: E402
 import trkfile  # noqa: E402
 from assets import (Assets, BuildError, DEFAULT_PACKS, cache_dir_for,  # noqa: E402
-                    ensure_cache, gbxdump)
-from scene import Challenge  # noqa: E402
+                    ensure_cache, BRIDGE)
+from scene import CLIP, Challenge, fixed_stadium_flag_corpora  # noqa: E402
 
 # GmSurfMesh vtable in TmForever.exe; every static surface is a mesh.
 MESH_VTABLE = 0x00BBE17C
@@ -51,7 +51,8 @@ COLLISION_PAIRS = [bytes.fromhex(h) for h in (
 
 # Stadium's CHmsZone water owner: 32 m cells over the 32x32 block grid, water
 # surface at 8 m, floor at -992 m, no cell set by default. The set cells are
-# exactly the blocks carrying Water (13) faces (every live Stadium dump agrees).
+# the active Water/Pool field units. Replaced terrain blocks can remain in
+# the authored block list even though their units no longer own field cells.
 WATER_CELL = 32.0
 WATER_GRID = 32
 WATER_LEVEL = 8.0
@@ -59,33 +60,64 @@ WATER_FLOOR = -992.0
 WATER_MATERIAL = 13
 
 
-def water_map(track: trkfile.Track) -> trkfile.Water:
+def _water_cells_from_challenge(challenge: Challenge) -> set[tuple[int, int]]:
+    """Return the Stadium water-owner cells from active field units.
+
+    CHmsZone does not derive its binary map from the rendered Water-material
+    triangles.  The game marks the field cells occupied by Water/Pool block
+    units, while keeping the Stadium zone's single level at 8 m.  This matters
+    for raised pools: their mesh faces can be at y=16, y=80, or mixed heights,
+    but oracle snapshots still report level=8 and mark the block cells.  Clips
+    are scene-edge helpers and do not create CHmsZone cells.
+    """
+    cells: set[tuple[int, int]] = set()
+    for (x, z), column in challenge.field.items():
+        # Terrain units can own the bottom field slot while their authored
+        # coordinate is higher. A road may replace the unit at that higher
+        # coordinate without removing the pool below it (v_v9 replay1061552).
+        # Inspect the actual field owners rather than re-looking up units at
+        # their authored coordinates, or retaining overwritten block units.
+        if not any(field.unit is not None and field.unit.block.type != CLIP
+                   and field.unit.info.get("surface") in ("Water", "Pool")
+                   for field in column):
+            continue
+        if not (0 <= x < WATER_GRID and 0 <= z < WATER_GRID):
+            raise BuildError(f"water block outside the grid at ({x}, {z})")
+        cells.add((x, z))
+    return cells
+
+
+def water_map(track: trkfile.Track,
+              challenge: Challenge | None = None) -> trkfile.Water:
     cells = bytearray(WATER_GRID * WATER_GRID)
-    for entry in track.entries:
-        if not entry.active:
-            continue
-        surface = track.surfaces[entry.surface]
-        # Most blocks cannot contain water. Avoid decoding every triangle of
-        # every placement when none of its material slots is water.
-        if WATER_MATERIAL not in surface.materials:
-            continue
-        mesh = track.meshes[surface.mesh]
-        iso = struct.unpack("<12f", entry.iso)
-        for f in range(len(mesh.faces) // 32):
-            v0, v1, v2, mi = struct.unpack_from("<3IH", mesh.faces, f * 32 + 0x10)
-            if surface.materials[mi] != WATER_MATERIAL:
+    field_cells = (_water_cells_from_challenge(challenge)
+                   if challenge is not None else None)
+    if field_cells is None:
+        # Legacy mesh-only diagnostics cannot recover field ownership. The
+        # production builder always supplies Challenge and skips this scan.
+        for entry in track.entries:
+            if not entry.active:
                 continue
-            cx = cz = 0.0
-            for v in (v0, v1, v2):
-                x, y, z = struct.unpack_from("<3f", mesh.vertices, v * 12)
-                wy = iso[3] * x + iso[4] * y + iso[5] * z + iso[10]
-                if abs(wy - WATER_LEVEL) > 1e-4:
-                    raise BuildError(f"water face at y={wy}, not {WATER_LEVEL}")
-                cx += (iso[0] * x + iso[1] * y + iso[2] * z + iso[9]) / 3
-                cz += (iso[6] * x + iso[7] * y + iso[8] * z + iso[11]) / 3
-            fx, fz = int(cx // WATER_CELL), int(cz // WATER_CELL)
-            if not (0 <= fx < WATER_GRID and 0 <= fz < WATER_GRID):
-                raise BuildError(f"water face outside the grid at ({cx}, {cz})")
+            surface = track.surfaces[entry.surface]
+            if WATER_MATERIAL not in surface.materials:
+                continue
+            mesh = track.meshes[surface.mesh]
+            iso = struct.unpack("<12f", entry.iso)
+            for f in range(len(mesh.faces) // 32):
+                v0, v1, v2, mi = struct.unpack_from("<3IH", mesh.faces, f * 32 + 0x10)
+                if surface.materials[mi] != WATER_MATERIAL:
+                    continue
+                cx = cz = 0.0
+                for v in (v0, v1, v2):
+                    x, y, z = struct.unpack_from("<3f", mesh.vertices, v * 12)
+                    cx += (iso[0] * x + iso[1] * y + iso[2] * z + iso[9]) / 3
+                    cz += (iso[6] * x + iso[7] * y + iso[8] * z + iso[11]) / 3
+                fx, fz = int(cx // WATER_CELL), int(cz // WATER_CELL)
+                if not (0 <= fx < WATER_GRID and 0 <= fz < WATER_GRID):
+                    raise BuildError(f"water face outside the grid at ({cx}, {cz})")
+                cells[fz * WATER_GRID + fx] = 1
+    else:
+        for fx, fz in field_cells:
             cells[fz * WATER_GRID + fx] = 1
     return trkfile.Water(WATER_CELL, WATER_CELL, 0.0, 0.0, WATER_GRID, WATER_GRID, 0,
                          WATER_LEVEL, WATER_FLOOR, bytes(cells))
@@ -95,31 +127,32 @@ def challenge_json(assets: Assets, path: str) -> dict:
     """Dump the challenge through GbxDump, cached by file hash."""
     import json
     digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
-    out = os.path.join(assets.json_root, "challenges", digest + ".json")
+    # v2 includes lap-race metadata. Asset JSON is unchanged, so updating
+    # this per-challenge cache does not re-extract the installed game packs.
+    out = os.path.join(assets.json_root, "challenges-v2", digest + ".json")
     if not os.path.exists(out):
+        import tempfile
         os.makedirs(os.path.dirname(out), exist_ok=True)
-        gbxdump("dump", path, out)
+        fd, temporary = tempfile.mkstemp(dir=os.path.dirname(out), suffix='.json')
+        os.close(fd)
+        try:
+            BRIDGE.request('dump', path, output=temporary)
+            os.replace(temporary, out)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
     with open(out) as fh:
         return json.load(fh)["node"]
 
 
-def build(assets: Assets, challenge_path: str, env: str | None = None,
-          quality: str = "low") -> trkfile.Track:
-    doc = challenge_json(assets, challenge_path)
-    if env is not None and doc["collection"] != env:
-        raise BuildError(f"challenge environment is {doc['collection']}, not {env}")
-    ch = Challenge(assets, doc, quality)
-    ch.init()
-    corpora = ch.corpora()
+def geometry_track(corpora) -> trkfile.Track:
+    """Serialize collision geometry in the game's tree and corpus order."""
     cells = bvh.flatten(corpora)
     if not cells:
         raise BuildError("no static surfaces")
     nodes = bvh.build(cells)
 
     track = trkfile.Track()
-    track.track_sha256 = hashlib.sha256(open(challenge_path, "rb").read()).digest()
-    track.material_data = MATERIAL_DATA
-    track.collision_pairs = list(COLLISION_PAIRS)
     mesh_index: dict[int, int] = {}
     tree_ids: dict[int, int] = {}
     corpus_ids: dict[int, int] = {}
@@ -146,10 +179,67 @@ def build(assets: Assets, challenge_path: str, env: str | None = None,
         track.entries.append(trkfile.Entry(
             node.skip, fp.box_to_bytes(node.box), fp.iso_to_bytes(cell.iso),
             cell.tree.flags, surface_index, tree_ids[tree_key], corpus_ids[cell.corpus]))
-    if doc["collection"] != "Stadium":
-        raise BuildError(f"water map constants are Stadium's, challenge is {doc['collection']}")
-    track.water = water_map(track)
     return track
+
+
+def append_fixed_decoration_collisions(track: trkfile.Track, assets: Assets,
+                                      decoration: dict) -> int:
+    """Add fixed flag meshes while preserving all existing static leaf order.
+
+    A new parent contains the unchanged static tree followed by a separate flag
+    subtree. Existing mesh/surface/corpus identities remain unchanged. The
+    reserved header marker prevents a cached fixture from gaining duplicates.
+    """
+    if track.fixed_decoration_collisions:
+        return 0
+    corpora = fixed_stadium_flag_corpora(assets, decoration)
+    if not corpora:
+        track.fixed_decoration_collisions = True
+        return 0
+    fixed = geometry_track(corpora)
+    mesh_offset, surface_offset = len(track.meshes), len(track.surfaces)
+    tree_offset = max(entry.tree for entry in track.entries)
+    corpus_offset = len(track.corpus_isos)
+    entries = [trkfile.Entry(entry.skip, entry.box, entry.iso, entry.flags,
+        entry.surface + surface_offset if entry.active else 0,
+        entry.tree + tree_offset if entry.active else 0,
+        entry.corpus + corpus_offset if entry.active else 0) for entry in fixed.entries]
+    box = fp.box_union(fp.box_from_bytes(track.entries[0].box), fp.box_from_bytes(entries[0].box))
+    parent = trkfile.Entry(1 + len(track.entries) + len(entries), fp.box_to_bytes(box),
+                          b'\0' * 48, 0, 0, 0, 0)
+    track.entries = [parent, *track.entries, *entries]
+    track.surfaces.extend(trkfile.Surface(surface.mesh + mesh_offset, surface.materials)
+                          for surface in fixed.surfaces)
+    track.meshes.extend(fixed.meshes)
+    track.corpus_isos.extend(fixed.corpus_isos)
+    track.fixed_decoration_collisions = True
+    return len(fixed.surfaces)
+
+
+def build_from_challenge(assets: Assets, ch: Challenge, challenge_path: str,
+                         env: str | None = None) -> trkfile.Track:
+    """Build the static snapshot from an already initialized challenge scene."""
+    if env is not None and ch.doc['collection'] != env:
+        raise BuildError(f"challenge environment is {ch.doc['collection']}, not {env}")
+    track = geometry_track(ch.corpora())
+    with open(challenge_path, 'rb') as stream:
+        track.track_sha256 = hashlib.sha256(stream.read()).digest()
+    track.material_data = MATERIAL_DATA
+    track.collision_pairs = list(COLLISION_PAIRS)
+    if ch.doc["collection"] != "Stadium":
+        raise BuildError(f"water map constants are Stadium's, challenge is {ch.doc['collection']}")
+    track.water = water_map(track, ch)
+    return track
+
+
+def build(assets: Assets, challenge_path: str, env: str | None = None,
+          quality: str = "low", allow_ground_mismatch: bool = False) -> trkfile.Track:
+    doc = challenge_json(assets, challenge_path)
+    if env is not None and doc["collection"] != env:
+        raise BuildError(f"challenge environment is {doc['collection']}, not {env}")
+    ch = Challenge(assets, doc, quality, allow_ground_mismatch=allow_ground_mismatch)
+    ch.init()
+    return build_from_challenge(assets, ch, challenge_path, env)
 
 
 def main(argv=None) -> int:
@@ -163,6 +253,10 @@ def main(argv=None) -> int:
     ap.add_argument("--env", help="require the challenge to use this environment (collection)")
     ap.add_argument("--quality", choices=("low", "high"), default="low",
                     help="display quality the game ran with (drives the warp decorator's flag bits)")
+    ap.add_argument("--allow-ground-mismatch", action="store_true",
+                    help="permit TMX unit/mobil ground selection to differ, as in the game")
+    ap.add_argument('--fixed-decoration-collisions', action='store_true',
+                    help='include fixed Stadium flag meshes for native physics; omit for static-snapshot comparisons')
     ap.add_argument("--limit", type=int, default=20, help="rows shown per differing section")
     args = ap.parse_args(argv)
 
@@ -171,7 +265,11 @@ def main(argv=None) -> int:
     assets = Assets(args.packs, cache)
     started = time.monotonic()
     try:
-        track = build(assets, args.challenge, args.env, args.quality)
+        track = build(assets, args.challenge, args.env, args.quality, args.allow_ground_mismatch)
+        if args.fixed_decoration_collisions:
+            document = challenge_json(assets, args.challenge)
+            decoration = assets.decoration(document['collection'], document['decoration']['id'])
+            append_fixed_decoration_collisions(track, assets, decoration)
     except BuildError as error:
         print(f"build_track: {args.challenge}: {error}", file=sys.stderr)
         return 1

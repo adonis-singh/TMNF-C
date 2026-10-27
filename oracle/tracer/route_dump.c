@@ -403,9 +403,9 @@ static uint32_t find_start_block(uint32_t challenge)
 		uint32_t type =
 			block == 0 ? WAYPOINT_NONE : block_waypoint_type(block);
 		if (type == WAYPOINT_START || type == WAYPOINT_START_FINISH) {
-			if (found != UINT32_MAX)
-				fatal("multiple start blocks");
+			/* GetStartBlock(0), 0x005AC4E0: first matching active block. */
 			found = i;
+			break;
 		}
 	}
 	if (found == UINT32_MAX)
@@ -607,12 +607,6 @@ static void write_snapshot(
 		if (finishes[i].waypoint_type != WAYPOINT_FINISH
 		    && finishes[i].waypoint_type != WAYPOINT_START_FINISH)
 			fatal("route finish has an invalid waypoint type");
-		if (finishes[i].waypoint_type == WAYPOINT_START_FINISH
-		    && (finish_count != 1
-		        || start.waypoint_type != WAYPOINT_START_FINISH
-		        || start.block_index != finishes[i].block_index
-		        || read_u32(race + 0xEC) <= 1))
-			fatal("shared start/finish route metadata mismatch");
 	}
 
 	memset(&metadata, 0, sizeof(metadata));

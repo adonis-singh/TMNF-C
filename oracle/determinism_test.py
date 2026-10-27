@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import os
 from pathlib import Path
 import struct
 import sys
@@ -237,6 +238,9 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8478)
     parser.add_argument("--ticks", type=int, default=DEFAULT_TICKS)
+    parser.add_argument("--socket-timeout", type=float,
+                        default=float(os.environ.get("TMNF_TMI_SOCKET_TIMEOUT", "60")),
+                        help="TCP read timeout while waiting for a slow custom map")
     parser.add_argument("--map", default=DEFAULT_MAP)
     parser.add_argument(
         "--output-dir",
@@ -247,7 +251,7 @@ def main() -> int:
     parser.add_argument("--cross-process-reference", type=Path)
     args = parser.parse_args()
 
-    interface = TMInterface(args.port, timeout=60)
+    interface = TMInterface(args.port, timeout=args.socket_timeout)
     connect_message = interface.read_message_type()
     if connect_message != MessageType.SC_ON_CONNECT_SYNC:
         raise RuntimeError(f"expected connect sync, got {connect_message.name}")

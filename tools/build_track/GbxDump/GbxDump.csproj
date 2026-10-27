@@ -7,7 +7,8 @@
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="GBX.NET" Version="2.4.4" />
+    <!-- Pinned 2.4.4 plus ../gbx_legacy_clip.patch; built by build_gbx_compat.py. -->
+    <PackageReference Include="GBX.NET" Version="2.4.4.2" />
     <PackageReference Include="GBX.NET.LZO" Version="2.1.5" />
     <PackageReference Include="GBX.NET.PAK" Version="2.4.4" />
   </ItemGroup>
