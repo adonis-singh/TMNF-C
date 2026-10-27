@@ -44,6 +44,9 @@ To run a racing environment, follow [local asset setup](docs/LOCAL_ASSETS.md).
 It uses your installed game packs and a Wine/TMInterface setup to generate
 track, vehicle and route snapshots. Game assets and recorded captures are
 not bundled with the repository.
+For replay validation, the [offline fixture workflow](docs/LOCAL_ASSETS.md#offline-replay-validation-fixtures)
+reuses one vehicle graph and generates map fixtures directly from installed
+packs. Its sparse routes are for validation rather than RL rewards.
 
 For CUDA, configure with `-DTMNF_CUDA=ON` and set
 `-DCMAKE_CUDA_ARCHITECTURES` to your GPU's compute capability, such as `86`

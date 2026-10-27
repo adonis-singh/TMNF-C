@@ -70,6 +70,65 @@ To capture and compare a campaign replay after local asset setup, use
 `--help`. The saved events JSON includes the native replay exit status and
 comparison output.
 
+## Offline replay collection
+
+`python/tmnf_collection_ffi.h` exposes recorded-input collection without RL
+timeouts, autoresets or reward shaping. CPU and CUDA collection accept the
+same offline track, vehicle graph, validation route and exact trigger sidecar.
+Graph initialization simulates the blocked countdown; recorded seeds, lap
+limits and initial positions remain per-environment settings. Recorded ghost
+respawns retain the clock and the previous spawn before the first checkpoint;
+live environments retain the restart rule.
+
+The tick API returns the input-applied state entering a physics step. The
+first frame is labelled 10 ms. Bulk collection preserves this convention and
+can retain caller-selected timestamps as well as control changes and 100 ms
+boundaries. Frames contain raw game-layout car/wheel data and complete
+checkpoint flags. Collection frame version 3 packs those flags for routes
+above the earlier 64-flag limit; version 2 retains the small-route layout.
+Snapshots use pointer-free checkpoint sets and snapshot version 7.
+
+The shared physics source now processes checkpoint and finish callbacks in
+the sorted collision response stream, retaining trigger spatial traversal,
+overlapping-finish behavior and per-lap checkpoint state. Reduced collision
+tests cover end-vertex rounding and the contact-merge dot-product order.
+
+A local CPU corpus regression generated fixtures, validated recorded
+trajectories/checkpoint times and collected state data for 819,014 identifiable
+sources. It retained 816,172 usable outputs, excluded 2,796 actual game
+rejections and quarantined 46 source inconsistencies. Another 451 original
+captures could not be bound unambiguously to a source replay. Fresh isolated
+game checks resolved 2,292 meaningful differences from older tensors; those
+saved native outputs matched the fresh references. These counts describe the
+audited corpus, not a universal guarantee for arbitrary unseen maps.
+
+CUDA was checked separately on an RTX 3090: 29 replays, including a seeded
+start, a five-lap race and a 2,000-checkpoint race, matched complete CPU frames
+and checkpoint callbacks for 63,012 ticks. The encoded CUDA outputs also
+matched fresh isolated game references at every tick: 297 continuous and 10
+categorical values, recorded checkpoint times and finish times. Synthetic
+early-respawn inputs matched with both authored and explicitly supplied
+initial positions. A 33-environment lockstep check covered discrete and
+analog actions, snapshot exchange, restart/stuck terminations and autoresets.
+The dedicated CUDA checkpoint test covers 88-checkpoint laps and every bit of
+the 2,048-bit checkpoint set. The full 819,014-source regression was CPU-only.
+
+The default source-only CTest suite runs the synthetic physics/race tests,
+offline asset/route tests and replay input-timing tests. Optional local-data
+checks are built when CUDA is enabled:
+
+```bash
+build/tests/checkpoint_set_cuda
+build/tests/collection_parity TRACK VEHICLE ROUTE TRIGGERS SHA256 INPUTS LAPS SEED 1
+build/tests/cuda_lockstep random TRACK VEHICLE ROUTE SHA256 33 200 TRIGGERS 1
+```
+
+`INPUTS` contains native `TMNFRaceInputs` records, one per 10 ms tick.
+The final `1` selects recorded respawns for collection or graph initialization
+for lockstep. `collection_parity` also accepts a final position-reset flag.
+These checks require locally generated fixtures and the local physics image;
+game assets and replay captures remain outside the public source tree.
+
 ## Policy results
 
 The README reports per-track policies evaluated from the official start.

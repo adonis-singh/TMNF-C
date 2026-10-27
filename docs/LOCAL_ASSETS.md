@@ -38,10 +38,13 @@ unless you have the necessary redistribution rights.
 
 ## Track, vehicle and route snapshots
 
-The current complete import path captures snapshots from a locally running
-game through Wine and TMInterface. The offline track builder can generate
-collision geometry from packs, but does not yet replace vehicle and route
-capture. A packs directory alone is therefore insufficient for RL setup.
+The complete RL import path captures snapshots from a locally running game
+through Wine and TMInterface. Offline replay validation can generate collision
+geometry, starts, checkpoint/finish triggers and respawn poses from installed
+packs, reusing one captured vehicle graph for the environment. The offline
+route contains validation anchors rather than driving guidance; it is not a
+replacement for an RL route. A packs directory alone is insufficient for the
+initial vehicle graph or for a complete RL setup.
 
 The research capture tools expect a Wine prefix with the game installed at
 `C:\TmNationsForever` or `C:\TmUnitedForever`, TMInterface 2.2.1 through
@@ -100,3 +103,41 @@ validated end to end.
 build collision geometry locally. `tools/extract_game_assets/extract_game_assets.py`
 accepts `--game-dir DIR` to generate Stadium viewer assets. Both require their
 GBX.NET helper and the user's installed data. Generated content remains local.
+
+## Offline replay validation fixtures
+
+After preparing the physics image and one Stadium vehicle graph, install
+`pygbx` in the tools environment. The asset reader also requires the .NET SDK
+described above. Then generate fixtures for a replay's embedded map:
+
+```bash
+build/assets-venv/bin/pip install pygbx
+build/assets-venv/bin/python tools/prepare_tmx_fixtures.py \
+  --replay /path/to/example.Replay.Gbx \
+  --fixture-backend offline --track-backend offline \
+  --reference-mode assets --route-mode validation --exact-triggers \
+  --packs /path/to/TmNationsForever/Packs \
+  --vehicle-template oracle/vehicles/A01-Stadium.tmnfvehicle \
+  --physics-library build/libtmnf_physics.so \
+  --workers 4 --registry-batch-size 32
+```
+
+Repeat `--replay` or use `--source-dir` to prepare multiple maps. `SETTINGS`
+also supports IDE execution. The first run extracts the required installed
+assets; subsequent maps reuse the verified cache. Map work runs in independent
+CPU workers, with crash-safe registry updates. The fully offline mode does not
+launch Wine. Generation fingerprints and file hashes prevent reuse of stale
+fixtures, and UID plus geometry identity distinguishes edited maps.
+
+Use the same installed packs as the game used for reference captures. In
+particular, extra United packs can supply geometry that a Nations installation
+does not load. Cache package identities are checked before reuse. Unknown block
+IDs omitted by the game's map loader are recorded separately; a known block
+with missing geometry remains an error.
+
+The generated registry is `local/collection_track_variants.json`; files live
+under `local/collection-fixtures/`. Exact trigger geometry is a
+`.tmnftriggers` sidecar with the game's spatial traversal. Retain this sidecar
+for exact replay comparisons. The route is explicitly marked validation-only:
+its sparse guidance line is unsuitable for progress rewards or off-track
+termination. The ordinary game-import workflow still supplies those RL routes.
