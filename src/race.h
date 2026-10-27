@@ -33,10 +33,18 @@ enum {
 	TMNF_RACE_TICK_MS = 10,
 	TMNF_RACE_PROJECTION_WINDOW_SEGMENTS = 32,
 	TMNF_RACE_TELEPORT_DISTANCE_METERS = 32,
-	TMNF_RACE_MAX_CHECKPOINTS = 63,
+	TMNF_RACE_MAX_CHECKPOINTS = TMNF_CHECKPOINT_CAPACITY - 1,
 	TMNF_RACE_FINISH_CONTACT_BIT = 63,
 	TMNF_MATERIAL_GRASS = TMNF_SURFACE_GRASS,
 	TMNF_MATERIAL_WET_GRASS = TMNF_SURFACE_WET_GRASS,
+};
+
+/* A checkpoint can be accepted during the blocked countdown. Finish-line
+ * progression starts at time zero; the live bootstrap step also has time zero. */
+enum {
+	TMNF_RACE_RUNNING = 0,
+	TMNF_RACE_COUNTDOWN = 1,
+	TMNF_RACE_START_TICK = 2,
 };
 
 /*
@@ -57,10 +65,13 @@ enum {
 #define TMNF_RACE_CORRIDOR_BELOW_METERS 16.0f
 
 typedef struct {
-	uint64_t visited_checkpoints;   /* bit i: checkpoint i taken this lap */
-	uint64_t trigger_contacts;      /* low bits: checkpoints; finish i uses bit 63-i */
+	/* Low-word aliases preserve small-route callers; full sets carry every
+	 * supported checkpoint and independent finish alternative. */
+	union { uint64_t visited_checkpoints; TmnfCheckpointSet visited; };
+	union { uint64_t trigger_contacts; TmnfCheckpointSet contacts; };
 	uint32_t visited_count;
 	uint32_t completed_laps;
+	uint32_t lap_limit;            /* map default, or recorded race's lap setting */
 	uint32_t passed_race_checkpoints;
 	uint32_t elapsed_ticks;
 	uint32_t finish_time_ms;
@@ -87,7 +98,7 @@ typedef struct {
 	/* CTrackManiaPlayerInfo+0x2e8: a respawnable checkpoint was passed. Without
 	 * it 0x00472700 SmallRespawn restarts the race instead of respawning. */
 	uint8_t respawn_available;
-	uint8_t reserved[1];
+	uint8_t phase;
 } TmnfRaceState;
 
 typedef struct {
@@ -98,6 +109,26 @@ typedef struct {
 	uint32_t checkpoint_index;
 	uint32_t race_time_ms;
 } TmnfRaceStepResult;
+
+/* Trigger records join ordinary collisions before the game's spatial sort.
+ * Native track corpus references occupy the low half of the ID space. */
+#define TMNF_RACE_TRIGGER_CORPUS_BASE UINT32_C(0x80000000)
+
+/* Detect before static track contacts and share the vehicle's per-sphere
+ * buffers. Activation/merge order affects the game's collision sort ties. */
+TMNF_HD void TmnfRace_DetectTriggerCollisions(const TmnfRoute *route,
+	CHmsCollisionManager_SZone *zone, CPlugTree *car_tree,
+	const GmIso4 *car_world_transform, uint32_t car_corpus_ref);
+
+/* Real physics uses these three phases: contacts are accepted in collision
+ * response order, including repeated contacts after a lap resets its flags. */
+TMNF_HD void TmnfRace_BeginStep(const TmnfRoute *route, TmnfRaceState *state,
+	TmnfRaceStepResult *result);
+TMNF_HD int TmnfRace_ProcessContact(const TmnfRoute *route, TmnfRaceState *state,
+	uint32_t trigger_index, TmnfRaceStepResult *result);
+TMNF_HD TmnfRaceStepResult TmnfRace_EndStep(const TmnfRoute *route,
+	TmnfRaceState *state, const GmIso4 *car_world_transform,
+	TmnfRaceStepResult result);
 
 /*
  * The Stadium ground plane (StadiumGrass terrain: Grass, WetGrass). Every
@@ -126,6 +157,7 @@ TMNF_HD int TmnfRace_TriggerContact(
 	const GmIso4 *car_world_transform);
 
 /*
+ * Legacy mask helper, restricted to TmnfRoute_ContactMaskSupported routes.
  * Every trigger of the route against the car tree at one transform: bit i
  * for checkpoint i, TMNF_RACE_FINISH_CONTACT_BIT for the finish. The
  * physics step calls this from each collision detection pass with the
@@ -157,7 +189,9 @@ TMNF_HD int TmnfRace_UpdateOffTrack(
 	uint32_t wheels_on_ground_plane);
 
 /*
- * Advances race bookkeeping by one canonical 10 ms physics tick.
+ * Advances synthetic mask-based races by one canonical 10 ms physics tick.
+ * Restricted to TmnfRoute_ContactMaskSupported routes; real physics uses
+ * BeginStep/ProcessContact/EndStep and supports the full checkpoint set.
  * trigger_contacts is the tick's TmnfPhysicsWorld.trigger_contacts: the OR
  * of TmnfRace_TriggerContactMask over the step's detection passes. A trigger
  * event is a contact edge: contact this tick and none on the previous tick.

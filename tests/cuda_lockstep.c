@@ -1,7 +1,7 @@
 /*
  * CPU-vs-GPU lockstep. TmnfVecEnv and TmnfCudaVecEnv are driven with the same
  * actions and must agree byte for byte every tick: every TmnfStepResult
- * (observations, reward, flags) and every TmnfEnvSnapshot v6 field.
+ * (observations, reward, flags) and every TmnfEnvSnapshot v7 field.
  *
  *   cuda_lockstep random TRACK VEHICLE ROUTE SHA256 ENVS TICKS
  *     ENVS environments, one random discrete action per env per tick, with a
@@ -241,7 +241,14 @@ static void pair_create(
 	pair->physics = allocate(count, sizeof(*pair->physics));
 	pair->player_indices = allocate(count, sizeof(*pair->player_indices));
 	for (uint32_t i = 0; i < count; ++i) {
-		pair->owners[i] = World_Create(track, vehicle_path);
+		if (config->use_world_spawn) {
+			TmnfRaceState initial_race;
+			uint32_t prestart;
+			pair->owners[i] = World_CreateRaceAfterCountdownSeed(track, vehicle_path,
+				&route->start->spawn, 0, 259, route, &initial_race, 0, &prestart);
+		} else {
+			pair->owners[i] = World_Create(track, vehicle_path);
+		}
 		pair->physics[i] = World_GetPhysicsWorld(pair->owners[i]);
 	}
 	TmnfVecEnvConfig cpu_config = *config;
@@ -349,9 +356,10 @@ static void pair_round_trip(Pair *pair, uint32_t tick)
 
 static void run_random(
 	TmnfTrack *track, TmnfRoute *route, const char *vehicle_path,
-	uint32_t count, uint32_t ticks)
+	uint32_t count, uint32_t ticks, int initialize_from_graph)
 {
 	TmnfVecEnvConfig config = TmnfVecEnv_DefaultConfig();
+	config.use_world_spawn = initialize_from_graph;
 	config.max_race_ticks = 1500;
 	config.horizon_ticks = 1200;
 	config.off_track_grace_ticks = 60;
@@ -507,7 +515,7 @@ static uint8_t discrete_action(const TMNFRaceInputs *input)
 
 static void run_replay(
 	TmnfTrack *track, TmnfRoute *route, const char *vehicle_path,
-	const char *inputs_path)
+	const char *inputs_path, int initialize_from_graph)
 {
 	uint32_t tick_count;
 	TMNFRaceInputs *inputs = read_inputs(inputs_path, &tick_count);
@@ -516,6 +524,7 @@ static void run_replay(
 	for (uint32_t r = 0; r < 2; ++r) {
 		uint32_t repeat = REPEATS[r];
 		TmnfVecEnvConfig config = TmnfVecEnv_DefaultConfig();
+		config.use_world_spawn = initialize_from_graph;
 		config.respawn_action = 1;
 		if (analog)
 			config.action_space = TMNF_ACTION_SPACE_ANALOG;
@@ -569,26 +578,35 @@ int main(int argc, char **argv)
 {
 	if (argc < 6) {
 		fprintf(stderr,
-			"usage: cuda_lockstep random TRACK VEHICLE ROUTE SHA256 ENVS TICKS\n"
-			"       cuda_lockstep replay TRACK VEHICLE ROUTE SHA256 INPUTS\n");
+			"usage: cuda_lockstep random TRACK VEHICLE ROUTE SHA256 ENVS TICKS [TRIGGERS [GRAPH]]\n"
+			"       cuda_lockstep replay TRACK VEHICLE ROUTE SHA256 INPUTS [TRIGGERS [GRAPH]]\n");
 		return 2;
 	}
 	uint8_t sha256[32];
 	parse_sha256(argv[5], sha256);
 	TmnfTrack *track = TmnfTrack_Load(argv[2], sha256);
 	TmnfRoute *route = TmnfRoute_Load(argv[4], sha256);
-	if (strcmp(argv[1], "random") == 0 && argc == 8) {
+	int random = strcmp(argv[1], "random") == 0;
+	int base_argc = random ? 8 : 7;
+	TmnfTrack *triggers = NULL;
+	if (argc > base_argc && strcmp(argv[base_argc], "-") != 0) {
+		triggers = TmnfTrack_LoadWithGrid(argv[base_argc], sha256, 0);
+		route->trigger_geometry = triggers;
+	}
+	int graph = argc > base_argc + 1 ? atoi(argv[base_argc + 1]) : 0;
+	if (random && argc >= 8 && argc <= 10) {
 		uint32_t count = (uint32_t)strtoul(argv[6], NULL, 10);
 		uint32_t ticks = (uint32_t)strtoul(argv[7], NULL, 10);
 		if (count == 0 || count > MAX_ENVS || ticks == 0)
 			fail("invalid env count or tick count");
-		run_random(track, route, argv[3], count, ticks);
-	} else if (strcmp(argv[1], "replay") == 0 && argc == 7) {
-		run_replay(track, route, argv[3], argv[6]);
+		run_random(track, route, argv[3], count, ticks, graph);
+	} else if (strcmp(argv[1], "replay") == 0 && argc >= 7 && argc <= 9) {
+		run_replay(track, route, argv[3], argv[6], graph);
 	} else {
 		fail("unknown mode");
 	}
 	TmnfRoute_Unload(route);
+	if (triggers != NULL) TmnfTrack_Unload(triggers);
 	TmnfTrack_Unload(track);
 	return 0;
 }

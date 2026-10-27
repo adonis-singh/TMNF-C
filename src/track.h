@@ -208,6 +208,10 @@ typedef struct {
  */
 TmnfTrack *TmnfTrack_Load(
 	const char *path, const uint8_t expected_track_sha256[32]);
+/* Short replay batches can skip building the optional acceleration grids.
+ * The original collision octrees remain available and preserve visit order. */
+TmnfTrack *TmnfTrack_LoadWithGrid(const char *path,
+	const uint8_t expected_track_sha256[32], int build_grid);
 void TmnfTrack_BindStaticGroup(
 	const TmnfTrack *track, CHmsCollisionManager_SGroup *group);
 void TmnfTrack_Unload(TmnfTrack *track);

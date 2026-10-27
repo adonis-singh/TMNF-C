@@ -663,20 +663,102 @@ static void test_alternative_finishes(void)
 	result = race_step_at(&route, &state, 28.6f);
 	require(result.finished && state.finish_time_ms == 30 && state.passed_race_checkpoints == 2,
 		"alternative finish failed to complete the race");
-	/* Entering another finish while the early finish stays contacted must
-	 * still count. No extra state or union-of-finish contact edge is needed. */
+	/* A finish already contacted becomes eligible on the last checkpoint,
+	 * without requiring the car to leave and enter a finish again. */
 	race_reset_at(&route.route, &state, &start);
 	(void)TmnfRace_Step(&route.route, &state, UINT64_C(1) << 63, &start);
-	(void)TmnfRace_Step(&route.route, &state, (UINT64_C(1) << 63) | 1, &start);
-	result = TmnfRace_Step(&route.route, &state,
-		(UINT64_C(1) << 63) | (UINT64_C(1) << 62), &start);
-	require(result.finished, "early finish contact masked a different finish entry");
+	result = TmnfRace_Step(&route.route, &state, (UINT64_C(1) << 63) | 1, &start);
+	require(result.finished && state.finish_time_ms == 20,
+		"continuing finish contact was not reconsidered on the final checkpoint");
 	/* Overlapping alternatives in one tick complete only one lap. */
 	race_reset_at(&route.route, &state, &start);
 	result = TmnfRace_Step(&route.route, &state,
 		(UINT64_C(1) << 63) | (UINT64_C(1) << 62) | 1, &start);
 	require(result.finished && state.completed_laps == 1 && state.passed_race_checkpoints == 2,
 		"simultaneous alternative finishes counted more than once");
+}
+
+static void test_many_single_lap_finishes(void)
+{
+	TestRoute route;
+	make_route(&route, 1, 1);
+	TmnfRouteTrigger finishes[100];
+	for (uint32_t i = 0; i < 100; ++i) {
+		finishes[i] = route.finish;
+		finishes[i].race_index = i;
+		finishes[i].transform = identity_at(30.0f + 10.0f * i);
+	}
+	route.metadata.finish_count = 100;
+	route.route.finish = finishes;
+	require(TmnfRoute_TriggerCountsSupported(&route.metadata),
+		"single-lap finish alternatives should share a contact signal");
+	GmIso4 start = identity_at(-10.0f);
+	for (uint32_t i = 0; i < 100; i += 33) {
+		TmnfRaceState state;
+		race_reset_at(&route.route, &state, &start);
+		TmnfRaceStepResult result = race_step_at(&route, &state, 28.6f + 10.0f * i);
+		require(!result.finished && state.trigger_contacts == (UINT64_C(1) << 63),
+			"overflow finish geometry was omitted or assigned an invalid bit");
+		result = TmnfRace_Step(&route.route, &state, (UINT64_C(1) << 63) | 1, &start);
+		require(result.finished && state.finish_time_ms == 20,
+			"overflow finish did not become eligible with the last checkpoint");
+	}
+	route.metadata.lap_count = 2;
+	require(TmnfRoute_TriggerCountsSupported(&route.metadata) &&
+		!TmnfRoute_ContactMaskSupported(&route.metadata),
+		"large multilap routes need full contact sets rather than a legacy mask");
+}
+
+static void test_large_checkpoint_laps(void)
+{
+	TestRoute route;
+	make_route(&route, 1, 2);
+	TmnfRouteTrigger checkpoints[88], finishes[2];
+	TmnfRouteReferencePoint points[90];
+	for (uint32_t i = 0; i < 88; ++i) checkpoints[i] = trigger_at((float)i, i);
+	for (uint32_t i = 0; i < 90; ++i) {
+		points[i] = (TmnfRouteReferencePoint){
+			.position = {(float)i, 0, 0}, .arc_length = (float)i, .half_width = 5};
+	}
+	finishes[0] = finishes[1] = route.finish;
+	route.metadata.checkpoint_count = 88;
+	route.metadata.finish_count = 2;
+	route.metadata.reference_count = route.metadata.centerline_count = 90;
+	route.metadata.total_race_checkpoints = route.metadata.race_checkpoint_limit = 178;
+	route.route.checkpoints = checkpoints;
+	route.route.finish = finishes;
+	route.route.centerline = points;
+	GmIso4 start = identity_at(0);
+	TmnfRaceState state;
+	TmnfRace_Reset(&route.route, &state, &start);
+	for (uint32_t lap = 0; lap < 2; ++lap) {
+		TmnfRaceStepResult result;
+		TmnfRace_BeginStep(&route.route, &state, &result);
+		(void)TmnfRace_ProcessContact(&route.route, &state, 87, &result);
+		(void)TmnfRace_ProcessContact(&route.route, &state, 87, &result);
+		require(state.visited_count == 1 && result.checkpoint_repeated,
+			"high checkpoint repeated or survived a lap reset");
+		for (uint32_t i = 0; i < 87; ++i)
+			if (i != 64) (void)TmnfRace_ProcessContact(&route.route, &state, i, &result);
+		(void)TmnfRace_ProcessContact(&route.route, &state, 89, &result);
+		require(!result.lap_completed && state.visited_count == 87,
+			"finish aliased an untaken high checkpoint");
+		(void)TmnfRace_ProcessContact(&route.route, &state, 64, &result);
+		(void)TmnfRace_ProcessContact(&route.route, &state, 88, &result);
+		require(result.lap_completed && state.completed_laps == lap + 1 &&
+			state.passed_race_checkpoints == 89 * (lap + 1), "large-route lap count");
+		if (lap == 0)
+			require(!state.finished && !TmnfCheckpointSet_Test(&state.visited, 87),
+				"new lap did not clear high checkpoint flags");
+		(void)TmnfRace_EndStep(&route.route, &state, &start, result);
+	}
+	require(state.finished && state.finish_time_ms == 20, "large-route final finish");
+	TmnfCheckpointSet set = {0};
+	for (uint32_t i = 0; i < TMNF_CHECKPOINT_CAPACITY; ++i) {
+		require(!TmnfCheckpointSet_All(&set, i + 1), "checkpoint word boundary aliased");
+		TmnfCheckpointSet_Add(&set, i);
+		require(TmnfCheckpointSet_All(&set, i + 1), "checkpoint word boundary missing");
+	}
 }
 
 static void test_any_order_checkpoints_and_finish_time(void)
@@ -735,7 +817,7 @@ static void test_any_order_checkpoints_and_finish_time(void)
 		"finished race still exposed a finish obligation");
 }
 
-/* Staying inside a trigger is one contact edge, not one event per tick. */
+/* Contact callbacks repeat; the visited flag permits one acceptance per lap. */
 static void test_continuous_contact_is_one_event(void)
 {
 	TestRoute route;
@@ -746,8 +828,9 @@ static void test_continuous_contact_is_one_event(void)
 	TmnfRaceStepResult result = race_step_at(&route, &state, -1.4f);
 	require(result.checkpoint_accepted, "checkpoint entry was missed");
 	result = race_step_at(&route, &state, -1.2f);
-	require(!result.checkpoint_accepted && !result.checkpoint_repeated,
-		"continuous trigger contact produced a second event");
+	require(!result.checkpoint_accepted && result.checkpoint_repeated &&
+		state.passed_race_checkpoints == 1,
+		"continuous trigger contact was accepted twice in one lap");
 	/* Fully inside the box no face is in front of the ellipsoid centre, so
 	 * the game's one-sided mesh test reports no contact. Leaving through
 	 * the far face touches it from outside again: a second edge, which the
@@ -764,6 +847,57 @@ static void test_continuous_contact_is_one_event(void)
 	result = race_step_at(&route, &state, -1.4f);
 	require(result.checkpoint_repeated,
 		"re-entry after leaving was not reported");
+}
+
+/* Real-game 7774523 and 4876859: overlapping triggers dispatch finish before
+ * checkpoint, and a checkpoint held through a lap reset counts again. */
+static TmnfRaceStepResult ordered_contacts(TestRoute *route, TmnfRaceState *state,
+	const uint32_t *contacts, uint32_t count)
+{
+	GmIso4 car = identity_at(0.0f);
+	TmnfRaceStepResult result;
+	TmnfRace_BeginStep(&route->route, state, &result);
+	for (uint32_t i = 0; i < count; ++i)
+		(void)TmnfRace_ProcessContact(&route->route, state, contacts[i], &result);
+	return TmnfRace_EndStep(&route->route, state, &car, result);
+}
+
+static void test_ordered_overlapping_contacts(void)
+{
+	TestRoute route;
+	make_route(&route, 1, 1);
+	TmnfRaceState state;
+	GmIso4 start = identity_at(-10.0f);
+	const uint32_t finish_then_cp[] = {1, 1, 0};
+	const uint32_t cp_then_finish[] = {0, 1};
+	const uint32_t finish[] = {1};
+	race_reset_at(&route.route, &state, &start);
+	TmnfRaceStepResult result = ordered_contacts(&route, &state, finish_then_cp, 3);
+	require(!result.finished && state.passed_race_checkpoints == 1,
+		"earlier finish contacts were reconsidered after a later checkpoint");
+	result = ordered_contacts(&route, &state, finish, 1);
+	require(result.finished && state.finish_time_ms == 20,
+		"continuing finish was not accepted on its next actual contact");
+	race_reset_at(&route.route, &state, &start);
+	result = ordered_contacts(&route, &state, cp_then_finish, 2);
+	require(result.finished && state.finish_time_ms == 10,
+		"checkpoint-before-finish order gained an artificial tick delay");
+
+	make_route(&route, 1, 3);
+	race_reset_at(&route.route, &state, &start);
+	const uint32_t cp[] = {0};
+	const uint32_t finish_cp_repeat[] = {1, 0, 0};
+	(void)ordered_contacts(&route, &state, cp, 1);
+	(void)ordered_contacts(&route, &state, finish_cp_repeat, 3);
+	require(state.completed_laps == 1 && state.passed_race_checkpoints == 3,
+		"checkpoint held across the first lap reset was not reaccepted once");
+	(void)ordered_contacts(&route, &state, finish_cp_repeat, 3);
+	require(state.completed_laps == 2 && state.passed_race_checkpoints == 5,
+		"checkpoint held across the second lap reset was not reaccepted once");
+	result = ordered_contacts(&route, &state, finish, 1);
+	require(result.finished && state.finish_time_ms == 40 &&
+		state.passed_race_checkpoints == 6,
+		"held-contact multilap sequence did not finish with the correct total");
 }
 
 /* Tracks like A10-Acrobatic have a start and a finish but no intermediate
@@ -838,6 +972,61 @@ static void test_lap_counting(void)
 		state.passed_race_checkpoints == 4 &&
 		result.race_time_ms == 70,
 		"multilap finish state is wrong");
+}
+
+static void test_countdown_checkpoint_progression(void)
+{
+	TestRoute test;
+	make_route(&test, 1, 2);
+	TmnfRaceState state;
+	TmnfRaceStepResult result;
+	TmnfRace_Reset(&test.route, &state, &test.start.transform);
+	state.phase = TMNF_RACE_COUNTDOWN;
+	for (uint32_t tick = 0; tick < 2; ++tick) {
+		TmnfRace_BeginStep(&test.route, &state, &result);
+		(void)TmnfRace_ProcessContact(&test.route, &state, 0, &result);
+		(void)TmnfRace_ProcessContact(&test.route, &state, 1, &result);
+	}
+	require(state.passed_race_checkpoints == 1 && state.visited_count == 1 &&
+		state.completed_laps == 0 && state.elapsed_ticks == 0 && !state.finished,
+		"countdown must retain checkpoints without advancing laps or clock");
+	state.phase = TMNF_RACE_START_TICK;
+	TmnfRace_BeginStep(&test.route, &state, &result);
+	(void)TmnfRace_ProcessContact(&test.route, &state, 1, &result);
+	(void)TmnfRace_ProcessContact(&test.route, &state, 0, &result);
+	require(state.passed_race_checkpoints == 3 && state.completed_laps == 1 &&
+		state.elapsed_ticks == 0 && !state.finished,
+		"start tick must accept a finish and another checkpoint at time zero");
+	state.phase = TMNF_RACE_RUNNING;
+	TmnfRace_BeginStep(&test.route, &state, &result);
+	(void)TmnfRace_ProcessContact(&test.route, &state, 1, &result);
+	require(state.finished && state.passed_race_checkpoints == 4 &&
+		state.finish_time_ms == 10,
+		"first live step must continue countdown progress at ten milliseconds");
+}
+
+static void test_recorded_lap_override(void)
+{
+	TestRoute route;
+	make_route(&route, 1, 2);
+	TmnfRaceState state;
+	GmIso4 start = identity_at(-10.0f);
+	race_reset_at(&route.route, &state, &start);
+	state.lap_limit = 3;
+	for (uint32_t lap = 1; lap <= 3; ++lap) {
+		(void)race_step_at(&route, &state, -1.4f);
+		(void)race_step_at(&route, &state, 5.0f);
+		TmnfRaceStepResult result = race_step_at(&route, &state, 8.6f);
+		require(state.completed_laps == lap && result.finished == (lap == 3),
+			"recorded race did not honor its own lap setting");
+		TmnfGateObservations gates;
+		TmnfRace_ObserveGates(&route.route, &state, &state.previous_car_transform, &gates);
+		require(gates.remaining_laps == 3 - lap,
+			"gate observations used the map default instead of the race setting");
+	}
+	require(state.passed_race_checkpoints == 6 && route.metadata.lap_count == 2 &&
+		route.metadata.total_race_checkpoints == 4,
+		"recorded lap setting changed immutable map metadata");
 }
 
 static void test_env_determinism_and_restore(
@@ -1662,9 +1851,10 @@ static void test_return_identities(
 
 int main(int argc, char **argv)
 {
-	if (argc != 5) {
+	int rules_only = argc == 2 && strcmp(argv[1], "--rules-only") == 0;
+	if (argc != 5 && !rules_only) {
 		fprintf(stderr,
-			"usage: race_env TRACK VEHICLE ROUTE POLICY_LAP_INPUTS\n");
+			"usage: race_env --rules-only | TRACK VEHICLE ROUTE POLICY_LAP_INPUTS\n");
 		return 2;
 	}
 	test_trigger_boundary();
@@ -1672,10 +1862,19 @@ int main(int argc, char **argv)
 	test_teleport_dense_reacquisition();
 	test_corridor_freezes_progress();
 	test_alternative_finishes();
+	test_many_single_lap_finishes();
+	test_large_checkpoint_laps();
 	test_any_order_checkpoints_and_finish_time();
 	test_continuous_contact_is_one_event();
+	test_ordered_overlapping_contacts();
 	test_zero_checkpoint_route();
 	test_lap_counting();
+	test_recorded_lap_override();
+	test_countdown_checkpoint_progression();
+	if (rules_only) {
+		puts("race rules: passed");
+		return 0;
+	}
 	test_env_determinism_and_restore(
 		argv[1], argv[2], argv[3]);
 	test_cross_env_restore(argv[1], argv[2], argv[3]);

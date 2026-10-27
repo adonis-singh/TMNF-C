@@ -30,12 +30,17 @@ target_include_directories(tmnf_physics PUBLIC "${CMAKE_SOURCE_DIR}/src")
 add_library(
 	tmnf_physics_shared SHARED
 	${PHYSICS_SOURCES}
-	"${CMAKE_SOURCE_DIR}/python/tmnf_env_ffi.c")
+	"${CMAKE_SOURCE_DIR}/python/tmnf_env_ffi.c"
+	"${CMAKE_SOURCE_DIR}/python/tmnf_collection_ffi.c")
 set_target_properties(tmnf_physics_shared PROPERTIES OUTPUT_NAME tmnf_physics)
 target_include_directories(
 	tmnf_physics_shared
 	PUBLIC "${CMAKE_SOURCE_DIR}/src" "${CMAKE_SOURCE_DIR}/python")
 target_link_libraries(tmnf_physics_shared PRIVATE m pthread)
+find_package(OpenMP QUIET COMPONENTS C)
+if(OpenMP_C_FOUND)
+	target_link_libraries(tmnf_physics_shared PRIVATE OpenMP::OpenMP_C)
+endif()
 
 # Python/RL uses the shared library. In release builds, let the compiler
 # inline across its translation units instead of routing internal physics
@@ -176,13 +181,18 @@ if(TMNF_CUDA)
 		tmnf_cuda_shared SHARED
 		${TMNF_CUDA_HOST_ONLY_SOURCES}
 		"${CMAKE_SOURCE_DIR}/python/tmnf_env_ffi.c"
+		"${CMAKE_SOURCE_DIR}/python/tmnf_collection_ffi.c"
 		"${CMAKE_SOURCE_DIR}/python/tmnf_cuda_env_ffi.c")
+	target_compile_definitions(tmnf_cuda_shared PRIVATE TMNF_COLLECTION_CUDA=1)
 	set_target_properties(tmnf_cuda_shared PROPERTIES OUTPUT_NAME tmnf_cuda)
 	target_include_directories(
 		tmnf_cuda_shared
 		PUBLIC "${CMAKE_SOURCE_DIR}/src" "${CMAKE_SOURCE_DIR}/src/cuda"
 		"${CMAKE_SOURCE_DIR}/python")
 	target_link_libraries(tmnf_cuda_shared PRIVATE tmnf_cuda m pthread)
+	if(OpenMP_C_FOUND)
+		target_link_libraries(tmnf_cuda_shared PRIVATE OpenMP::OpenMP_C)
+	endif()
 endif()
 
 # No game data or executable is required for the default source build.

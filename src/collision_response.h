@@ -239,6 +239,12 @@ TMNF_HD void CHmsZoneDynamic_SolveImpulse(
 /* 0x005497C0 */
 TMNF_HD void CHmsZoneDynamic_ComputeCollisionResponse(CHmsResponseZone *zone);
 
+/* Optional non-physical contacts participate in the same sort, then dispatch
+ * through a sink before body/material resolution. Return nonzero if handled. */
+typedef int (*CHmsSpecialContactFn)(void *user, const SHmsPhysicalCollision *collision);
+TMNF_HD void CHmsZoneDynamic_ComputeCollisionResponseWithContacts(
+	CHmsResponseZone *zone, CHmsSpecialContactFn contact, void *user);
+
 #ifdef __cplusplus
 }
 #endif

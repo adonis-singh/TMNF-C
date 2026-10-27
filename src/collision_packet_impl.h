@@ -92,13 +92,15 @@ TMNF_PACKET_TARGET static uint32_t TMNF_PACKET_NAME(const GmIso4 *inverse,
 			feature[axis] = PBLEND(is_edge, feature[axis], closest);
 		}
 		TMNF_PACKET_VECTOR feature_squared = PDOT(feature, feature);
+		TMNF_PACKET_VECTOR feature_distance = PSQRT(feature_squared);
+		/* The game rounds the end-vertex distance before its radius test. */
+		TMNF_PACKET_VECTOR tested_distance = PBLEND(is_end, feature_squared, feature_distance);
 		uint32_t reject =
 		    (is_edge & PLE(feature_squared, PSET(0x1.4f8b58p-17f))) |
-		    (~is_edge & (PGT(feature_squared, one) | PLE(feature_squared, PSET(0x1.b7cdfcp-34f))));
+		    (~is_edge & (PGT(tested_distance, one) | PLE(tested_distance, PSET(0x1.b7cdfcp-34f))));
 		uint32_t emit = positive & ~reject;
 		if (!emit)
 			continue;
-		TMNF_PACKET_VECTOR feature_distance = PSQRT(feature_squared);
 		/* Retain the game's double square root for the end vertex. */
 		feature_distance = PBLEND(is_end, feature_distance, PSQRT(feature_distance));
 		TMNF_PACKET_VECTOR inverse_distance = PDIV(one, feature_distance);

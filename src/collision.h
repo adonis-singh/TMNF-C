@@ -799,6 +799,10 @@ TMNF_HD void CHmsCollisionManager_SZone_DetectCollisionBetweenTreeAndStaticColli
 	CHmsCollisionManager_SZone *self, const GmIso4 *iso, CPlugTree *tree,
 	int active);
 
+TMNF_HD void CHmsCollisionManager_SZone_DetectStaticTreeWithCorpusOffset(
+	CHmsCollisionManager_SZone *self, const GmIso4 *iso, CPlugTree *tree,
+	uint32_t corpus_offset);
+
 /* 0x0053A3D0  Collides tree two's root/subtree against tree one's root. */
 /* UNVALIDATED */
 TMNF_HD int CHmsCollisionManager_SZone_ComputeCollisionTree1RootOnly(

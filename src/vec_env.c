@@ -808,6 +808,7 @@ TmnfVecEnvConfig TmnfVecEnv_DefaultConfig(void)
 		.autoreset_mode = TMNF_AUTORESET_SAME_STEP,
 		.action_space = TMNF_ACTION_SPACE_DISCRETE,
 		.respawn_action = 0,
+		.use_world_spawn = 0,
 	};
 }
 
@@ -852,6 +853,7 @@ static void validate_worlds(TmnfVecEnv *env)
  */
 static void validate_spawn(const TmnfVecEnv *env, uint32_t index)
 {
+	if (env->config.use_world_spawn) return;
 	const CHmsStateDyna *spawn = &env->reset_snapshots[index].live_state;
 	const TmnfRouteInitialState *initial =
 		&env->route->start->initial_state;
@@ -1093,7 +1095,7 @@ void TmnfPhysicsCorpus_AdvanceTimer(
  * then the zone steps. */
 static void physics_tick(
 	TmnfVecEnv *env, uint32_t index, const TMNFRaceInputs *input,
-	uint32_t tick_ms)
+	uint32_t tick_ms, TmnfRaceState *race)
 {
 	TmnfPhysicsCorpus *corpus = player_corpus(env, index);
 	if (input->respawn != 0) {
@@ -1107,6 +1109,9 @@ static void physics_tick(
 	}
 	CTrackManiaControlPlayerInput_UpdateVehicleStateFromInputs(
 		input, corpus->vehicle);
+	if (race != NULL)
+		env->worlds[index]->race_visited = race->visited;
+	env->worlds[index]->race_state = race;
 	TmnfPhysicsCorpus_AdvanceTimer(corpus, tick_ms);
 	CHmsZoneDynamic_PhysicsStep2(env->worlds[index], tick_ms);
 }
@@ -1122,7 +1127,7 @@ static void step_raw_range(
 {
 	RawStepContext *context = context_pointer;
 	for (uint32_t i = begin; i < end; ++i) {
-		physics_tick(env, i, &context->inputs[i], context->tick_ms);
+		physics_tick(env, i, &context->inputs[i], context->tick_ms, NULL);
 		write_physics_observation(
 			player_corpus(env, i), &context->observations[i]);
 	}
@@ -1359,11 +1364,11 @@ static int step_one_tick_input(
 			input.respawn = 0;
 		}
 	}
-	physics_tick(env, index, &input, TMNF_RACE_TICK_MS);
+	physics_tick(env, index, &input, TMNF_RACE_TICK_MS, race);
 
-	TmnfRaceStepResult race_result = TmnfRace_Step(
-		env->route, race, env->worlds[index]->trigger_contacts,
-		corpus->collision_corpus->live_iso);
+	TmnfRaceStepResult race_result = TmnfRace_EndStep(
+		env->route, race, corpus->collision_corpus->live_iso,
+		env->worlds[index]->race_step_result);
 	TmnfTerminationReason reason = race_result.finished
 		? TMNF_TERMINATION_FINISH
 		: failure_reason(env, index);

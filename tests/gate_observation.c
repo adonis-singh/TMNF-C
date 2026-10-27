@@ -20,7 +20,7 @@ int main(void)
 {
 	TmnfRouteMetadata metadata = {0};
 	metadata.checkpoint_count = 63; metadata.finish_count = 1; metadata.lap_count = 3;
-	TmnfRouteTrigger gates[63] = {0}, finish = {0};
+	TmnfRouteTrigger gates[88] = {0}, finish = {0};
 	TmnfRoute route = {0};
 	route.metadata = &metadata; route.checkpoints = gates; route.finish = &finish;
 	for (int i = 0; i < 63; ++i) {
@@ -31,6 +31,7 @@ int main(void)
 	finish.transform = identity(100, 0, 0);
 	finish.box.half_extent = (GmVec3){4, 5, 6};
 	TmnfRaceState state = {0}, before;
+	state.lap_limit = metadata.lap_count;
 	GmIso4 car = identity(0, 0, 0);
 	TmnfGateObservations out, baseline;
 	before = state;
@@ -70,6 +71,7 @@ int main(void)
 	for (int i = 0; i < 8; ++i) assert(!out.gates[i].valid);
 	/* Zero-checkpoint tracks expose the ready finish in the same slot. */
 	state = (TmnfRaceState){0}; metadata.checkpoint_count = 0;
+	state.lap_limit = metadata.lap_count;
 	TmnfRace_ObserveGates(&route, &state, &car, &out);
 	assert(out.gates[7].ready && !out.omitted_checkpoints);
 	/* Nonzero box centre plus rotated car/trigger; moving the entire scene
@@ -98,11 +100,25 @@ int main(void)
 	metadata.checkpoint_count = 0; metadata.finish_count = 2;
 	route.finish = alternatives;
 	memset(&state, 0, sizeof(state)); car = identity(0, 0, 0);
+	state.lap_limit = metadata.lap_count;
 	TmnfRace_ObserveGates(&route, &state, &car, &out);
 	assert(out.gates[7].center.x == 3 && out.gates[7].ready);
 	alternatives[0].transform = identity(-3, 0, 0);
 	TmnfRace_ObserveGates(&route, &state, &car, &out);
 	assert(out.gates[7].center.x == -3);
+	/* Obligations above bit 63 remain visible to the policy. */
+	metadata.checkpoint_count = 88;
+	for (uint32_t i = 63; i < 88; ++i) {
+		gates[i] = gates[0]; gates[i].transform = identity((float)i, 0, 0);
+	}
+	TmnfCheckpointSet_Clear(&state.visited);
+	for (uint32_t i = 0; i < 87; ++i) TmnfCheckpointSet_Add(&state.visited, i);
+	TmnfRace_ObserveGates(&route, &state, &car, &out);
+	assert(out.remaining_checkpoints == 1 && out.gates[0].checkpoint_index == 87);
+	assert(!out.gates[7].ready);
+	TmnfCheckpointSet_Add(&state.visited, 87);
+	TmnfRace_ObserveGates(&route, &state, &car, &out);
+	assert(out.remaining_checkpoints == 0 && out.gates[7].ready);
 	puts("gate observation: geometry, 63 checkpoints, masking, laps, ties, invariance passed");
 	return 0;
 }

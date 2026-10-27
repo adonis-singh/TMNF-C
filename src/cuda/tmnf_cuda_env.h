@@ -3,7 +3,7 @@
  *
  * Every environment is a byte copy of one host TmnfWorld relinked on the
  * device against a shared immutable track, vehicle blob and route plus
- * fixed-capacity per-environment scratch. Snapshots are TmnfEnvSnapshot v6,
+ * fixed-capacity per-environment scratch. Snapshots are TmnfEnvSnapshot v7,
  * interchangeable with TmnfVecEnv. Host-pointer arguments are copied across;
  * the Device* accessors expose the resident result buffers for zero-copy
  * consumers (a PyTorch tensor built from the raw device pointer).
@@ -83,6 +83,10 @@ void TmnfCudaVecEnv_Destroy(TmnfCudaVecEnv *env);
 const char *TmnfCudaVecEnv_LastError(void);
 uint32_t TmnfCudaVecEnv_Count(const TmnfCudaVecEnv *env);
 
+/* Recorded ghost playback retains the clock and start spawn on a respawn
+ * before the first checkpoint. Disabled by default for live environments. */
+void TmnfCudaVecEnv_SetReplayMode(TmnfCudaVecEnv *env, int enabled);
+
 /* Raw physics: TmnfVecEnv_Step. inputs has count entries; observations may
  * be NULL. */
 void TmnfCudaVecEnv_Step(
@@ -155,6 +159,8 @@ void TmnfCudaVecEnv_RestoreIndices(
  */
 void TmnfCudaVecEnv_CopyWorldToHost(
 	TmnfCudaVecEnv *env, uint32_t index, TmnfWorld *destination);
+void TmnfCudaVecEnv_CopyRaceToHost(
+	TmnfCudaVecEnv *env, uint32_t index, TmnfRaceState *destination);
 
 /* Raw step split for the replay harness: applies the inputs, copies world
  * index to destination (the record the game exposes between input and

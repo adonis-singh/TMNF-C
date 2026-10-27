@@ -911,12 +911,21 @@ static int compare_collision_buffer(
 	const struct TmnfDetectBuffer *expected,
 	const SHmsPhysicalCollision *records)
 {
-	if (actual == NULL
-	    || actual->base.collisions.count != expected->count
+	if (actual == NULL) {
+		if (diagnose) fprintf(stderr, "missing buffer id=%u\n", expected->id);
+		return 0;
+	}
+	if (actual->base.collisions.count != expected->count
 	    || actual->base.collisions.capacity != expected->capacity
 	    || (expected->has_active
-		&& actual->active != expected->active))
+		&& actual->active != expected->active)) {
+		if (diagnose)
+			fprintf(stderr, "buffer id=%u count=%u/%u capacity=%u/%u active=%u/%u\n",
+				expected->id, actual->base.collisions.count, expected->count,
+				actual->base.collisions.capacity, expected->capacity,
+				actual->active, expected->active);
 		return 0;
+	}
 	if (memcmp(actual->base.collisions.data,
 		    &records[expected->record_index],
 		    (size_t)expected->count * sizeof(SHmsPhysicalCollision)) != 0) {
@@ -1291,13 +1300,18 @@ int main(int argc, char **argv)
 	uint32_t passed_records = 0;
 	uint32_t unverifiable = 0;
 	int success = 1;
-	if (argc != 2) {
-		fprintf(stderr, "usage: %s TRACE_DIRECTORY\n", argv[0]);
+	if (argc != 2 && argc != 3) {
+		fprintf(stderr, "usage: %s TRACE_DIRECTORY [TARGET_VA]\n", argv[0]);
 		return 2;
 	}
+	uint32_t selected_target = argc == 3 ? (uint32_t)strtoul(argv[2], NULL, 0) : 0;
+	size_t inspected_targets = 0;
 
 	for (size_t i = 0; i < sizeof(targets) / sizeof(targets[0]); ++i) {
 		const Target *target = &targets[i];
+		if (selected_target != 0 && target->va != selected_target)
+			continue;
+		++inspected_targets;
 		char path[1024];
 		int length = snprintf(
 			path, sizeof(path), "%s/%s", argv[1], target->file_name);
@@ -1344,6 +1358,8 @@ int main(int argc, char **argv)
 		"%u/%zu functions unverifiable\n",
 		passed_records, replayed_records,
 		replayed_records, total_records, unverifiable,
-		sizeof(targets) / sizeof(targets[0]));
+		inspected_targets);
+	if (inspected_targets == 0)
+		fail("no matching target", argv[2]);
 	return success ? 0 : 1;
 }

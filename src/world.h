@@ -22,7 +22,7 @@ enum {
 	TMNF_WORLD_ALIGNMENT = 64,
 	/* Upper bound of World_Size, checked in world.c; the device steps each
 	 * world in a local buffer of this size. */
-	TMNF_WORLD_MAX_BYTES = 4800,
+	TMNF_WORLD_MAX_BYTES = 5312,
 	TMNF_WORLD_MERGE_CAPACITY = 8,
 };
 
@@ -37,6 +37,31 @@ int World_HasLocalAssets(void);
 TmnfWorld *World_Create(
 	const TmnfTrack *track,
 	const char *vehicle_snapshot_path);
+/* Experimental asset-template initialization: reset mutable state to a route
+ * spawn before the first tick. The vehicle graph must be track-bound, and
+ * callers must verify its environment/tuning and replay equivalence. */
+TmnfWorld *World_CreateAtSpawn(const TmnfTrack *track,
+	const char *vehicle_snapshot_path, const GmIso4 *spawn);
+TmnfWorld *World_CreateAtSpawnSeed(const TmnfTrack *track,
+	const char *vehicle_snapshot_path, const GmIso4 *spawn, uint32_t validation_seed);
+/* Settle the authored spawn with speed blocked, then reset the vehicle at
+ * the settled pose before its first live tick. No replay states are injected. */
+TmnfWorld *World_CreateAfterCountdownSeed(const TmnfTrack *track,
+	const char *vehicle_snapshot_path, const GmIso4 *spawn,
+	uint32_t validation_seed, uint32_t countdown_ticks);
+/* Race sensors participate in the same sphere buffers even while speed is
+ * blocked. Include them to preserve contact merging and ordering at spawn. */
+TmnfWorld *World_CreateAfterCountdownSeedWithRoute(const TmnfTrack *track,
+	const char *vehicle_snapshot_path, const GmIso4 *spawn,
+	uint32_t validation_seed, uint32_t countdown_ticks, const TmnfRoute *route);
+/* Also retain race progression across countdown and the time-zero bootstrap.
+ * Prestart crossings use the game's UINT32_MAX timestamp; the caller records
+ * prestart_checkpoints entries at that time and subsequent bootstrap entries
+ * at zero. No recorded state is used to initialize the player. */
+TmnfWorld *World_CreateRaceAfterCountdownSeed(const TmnfTrack *track,
+	const char *vehicle_snapshot_path, const GmIso4 *spawn,
+	uint32_t validation_seed, uint32_t countdown_ticks, const TmnfRoute *route,
+	TmnfRaceState *race, uint32_t lap_limit, uint32_t *prestart_checkpoints);
 void World_Destroy(TmnfWorld *world);
 
 /*
@@ -100,6 +125,8 @@ const TmnfPhysicsWorld *World_GetPhysicsWorldConst(const TmnfWorld *world);
 TMNF_HD TmnfPhysicsWorld *World_GetPhysicsWorld(TmnfWorld *world);
 TMNF_HD CSceneVehicleCar *World_GetPlayerVehicle(TmnfWorld *world);
 TMNF_HD const CHmsStateDyna *World_GetPlayerState(const TmnfWorld *world);
+/* Contact summary consumed by the game's sync-state update after a tick. */
+TMNF_HD uint32_t World_GetPlayerBodyContactNormal(const TmnfWorld *world, GmVec3 *normal);
 TMNF_HD const CFastBuffer_SHmsPhysicalCollision *World_GetLastCollisions(
 	const TmnfWorld *world);
 TMNF_HD const CHmsReplacementBuf *World_GetPlayerReplacements(

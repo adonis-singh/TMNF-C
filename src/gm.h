@@ -334,8 +334,17 @@ TMNF_HD static inline void GmIso4_Mult(GmIso4 *self, const GmIso4 *parent) {
 	gm_iso_store(self, gm_iso_mult(gm_iso_load(self), gm_iso_load(parent)));
 #else
 	GmVec3 translation = { self->t[0], self->t[1], self->t[2] };
-	GmMat3_Mult((GmMat3 *)self, (const GmMat3 *)parent);
+	/* GmIso4 and GmMat3 have the same rotation layout but are different
+	 * C types. Casted stores can be discarded under strict aliasing. */
+	GmMat3 rotation, parent_rotation;
+	for (int i = 0; i < 9; ++i) {
+		rotation.m[i] = self->m[i];
+		parent_rotation.m[i] = parent->m[i];
+	}
+	GmMat3_Mult(&rotation, &parent_rotation);
 	GmVec3_Mult_Iso4(&translation, parent);
+	for (int i = 0; i < 9; ++i)
+		self->m[i] = rotation.m[i];
 	self->t[0] = translation.x;
 	self->t[1] = translation.y;
 	self->t[2] = translation.z;
@@ -347,11 +356,16 @@ TMNF_HD static inline void GmIso4_SetInverse(GmIso4 *self, const GmIso4 *source)
 #if TMNF_SSE
 	gm_iso_store(self, gm_iso_inverse(gm_iso_load(source)));
 #else
-	GmMat3_SetTranspose((GmMat3 *)self, (const GmMat3 *)source);
+	GmMat3 source_rotation, rotation;
+	for (int i = 0; i < 9; ++i)
+		source_rotation.m[i] = source->m[i];
+	GmMat3_SetTranspose(&rotation, &source_rotation);
 	GmVec3 translation = {
 		-source->t[0], -source->t[1], -source->t[2],
 	};
-	GmVec3_Mult_Mat3(&translation, (const GmMat3 *)self);
+	GmVec3_Mult_Mat3(&translation, &rotation);
+	for (int i = 0; i < 9; ++i)
+		self->m[i] = rotation.m[i];
 	self->t[0] = translation.x;
 	self->t[1] = translation.y;
 	self->t[2] = translation.z;

@@ -22,8 +22,7 @@ TMNF_HD static void validate_route(const TmnfRoute *route)
 	 * start and a finish. The visited set, the finish gate, and the
 	 * total-checkpoint arithmetic below are all well defined for zero. */
 	if (metadata->lap_count == 0 ||
-		metadata->finish_count == 0 ||
-		(uint64_t)metadata->finish_count + metadata->checkpoint_count > 64 ||
+		!TmnfRoute_TriggerCountsSupported(metadata) ||
 		metadata->checkpoint_count > TMNF_RACE_MAX_CHECKPOINTS ||
 		metadata->reference_count != metadata->checkpoint_count + 2 ||
 		metadata->centerline_count < 2) {
@@ -204,7 +203,7 @@ typedef struct {
 
 TMNF_HD static int car_tree_contact(
 	const CPlugTree *car_tree, const GmIso4 *car_world_transform,
-	const GmBoxAligned *trigger_world_box, const TriggerMesh *mesh,
+	const GmBoxAligned *trigger_world_box, const CPlugSurface *surface,
 	const GmIso4 *trigger_iso, CHmsCollisionBuffer *buffer,
 	const CollisionRuntime *runtime)
 {
@@ -215,7 +214,7 @@ TMNF_HD static int car_tree_contact(
 	tree_world_iso(&car_world, car_tree, car_world_transform);
 	if (car_tree->surface != NULL && car_tree->surface->geom != NULL) {
 		contact |= CPlugSurface_ComputeCollision(
-			car_tree->surface, &car_world, &mesh->surface,
+			car_tree->surface, &car_world, surface,
 			trigger_iso, buffer, runtime);
 	}
 	if (car_tree->child_count > TRIGGER_TREE_STACK_CAPACITY)
@@ -238,7 +237,7 @@ TMNF_HD static int car_tree_contact(
 		tree_world_iso(&world, tree, &frame.parent_world);
 		if (tree->surface != NULL && tree->surface->geom != NULL) {
 			contact |= CPlugSurface_ComputeCollision(
-				tree->surface, &world, &mesh->surface, trigger_iso,
+				tree->surface, &world, surface, trigger_iso,
 				buffer, runtime);
 		}
 		if (depth + tree->child_count > TRIGGER_TREE_STACK_CAPACITY)
@@ -252,10 +251,11 @@ TMNF_HD static int car_tree_contact(
 	return contact;
 }
 
-TMNF_HD int TmnfRace_TriggerContact(
+TMNF_HD static int trigger_contact(
 	const TmnfRouteTrigger *trigger,
 	const CPlugTree *car_tree,
-	const GmIso4 *car_world_transform)
+	const GmIso4 *car_world_transform, const TmnfTrack *geometry,
+	uint32_t corpus_ref, CHmsCollisionBuffer *output)
 {
 	if (trigger == NULL || car_tree == NULL || car_world_transform == NULL)
 		race_fail("trigger test argument is null");
@@ -271,29 +271,50 @@ TMNF_HD int TmnfRace_TriggerContact(
 	if (!GmBoxAligned_TestInter(&car_box, &trigger_box))
 		return 0;
 
-	TriggerMesh mesh;
-	build_trigger_mesh(&mesh, &trigger->box);
 	CollisionRuntime runtime;
 	CollisionRuntime_Init(&runtime);
 	/* The contacts themselves are discarded; only their existence counts.
 	 * A device thread cannot allocate, so it records into a fixed-capacity
 	 * array and traps if a trigger ever produces more. */
-	CHmsCollisionBuffer buffer;
+	CHmsCollisionBuffer local;
+	CHmsCollisionBuffer *buffer = output != NULL ? output : &local;
 #if defined(__CUDA_ARCH__)
 	SHmsPhysicalCollision storage[TRIGGER_CONTACT_CAPACITY];
-	buffer.collisions.count = 0;
-	buffer.collisions.data = storage;
-	buffer.collisions.capacity = TRIGGER_CONTACT_CAPACITY;
+	if (output == NULL) {
+		local.collisions.count = 0;
+		local.collisions.data = storage;
+		local.collisions.capacity = TRIGGER_CONTACT_CAPACITY;
+	}
 #else
-	CHmsCollisionBuffer_Init(&buffer);
+	if (output == NULL) CHmsCollisionBuffer_Init(&local);
 #endif
-	int contact = car_tree_contact(
-		car_tree, car_world_transform, &trigger_box, &mesh,
-		&trigger->transform, &buffer, &runtime);
+	int contact = 0;
+	if (geometry != NULL) {
+		for (uint32_t i = 0; i < geometry->entry_count; ++i) {
+			const HmsStaticCollisionEntry *entry = &geometry->entries[i];
+			if (entry->corpus_ref != corpus_ref || entry->surface == NULL ||
+				(entry->tree_flags & 0x80u) == 0) continue;
+			if (output == NULL) buffer->collisions.count = 0;
+			contact |= car_tree_contact(car_tree, car_world_transform,
+				&trigger_box, entry->surface, &entry->iso, buffer, &runtime);
+			if (contact && output == NULL) break;
+		}
+	} else {
+		TriggerMesh mesh;
+		build_trigger_mesh(&mesh, &trigger->box);
+		contact = car_tree_contact(car_tree, car_world_transform, &trigger_box,
+			&mesh.surface, &trigger->transform, buffer, &runtime);
+	}
 #if !defined(__CUDA_ARCH__)
-	CHmsCollisionBuffer_Destroy(&buffer);
+	if (output == NULL) CHmsCollisionBuffer_Destroy(&local);
 #endif
 	return contact;
+}
+
+TMNF_HD int TmnfRace_TriggerContact(const TmnfRouteTrigger *trigger,
+	const CPlugTree *car_tree, const GmIso4 *car_world_transform)
+{
+	return trigger_contact(trigger, car_tree, car_world_transform, NULL, 0, NULL);
 }
 
 TMNF_HD uint64_t TmnfRace_TriggerContactMask(
@@ -301,19 +322,81 @@ TMNF_HD uint64_t TmnfRace_TriggerContactMask(
 	const GmIso4 *car_world_transform)
 {
 	validate_route(route);
+	if (!TmnfRoute_ContactMaskSupported(route->metadata))
+		race_fail("contact mask cannot represent this route; use individual trigger callbacks");
 	uint64_t mask = 0;
 	for (uint32_t i = 0; i < route->metadata->checkpoint_count; ++i) {
-		if (TmnfRace_TriggerContact(
-				&route->checkpoints[i], car_tree, car_world_transform))
+		if (trigger_contact(&route->checkpoints[i], car_tree, car_world_transform,
+				route->trigger_geometry, i + 1, NULL))
 			mask |= (uint64_t)1 << i;
 	}
-	/* Each alternative owns an edge bit: merging them would miss entering a
-	 * second finish while still touching a previously rejected first one. */
+	/* Keep every finish geometry. Single-lap overflow alternatives share a
+	 * signal; multilap routes preserve each alternative's contact edge. */
 	for (uint32_t i = 0; i < route->metadata->finish_count; ++i) {
-		if (TmnfRace_TriggerContact(&route->finish[i], car_tree, car_world_transform))
-			mask |= UINT64_C(1) << (TMNF_RACE_FINISH_CONTACT_BIT - i);
+		if (trigger_contact(&route->finish[i], car_tree, car_world_transform,
+				route->trigger_geometry, route->metadata->checkpoint_count + i + 1, NULL))
+			mask |= TmnfRoute_FinishContactBit(route->metadata, i);
 	}
 	return mask;
+}
+
+TMNF_HD static void detect_trigger_surface(CHmsCollisionManager_SZone *zone,
+	CPlugTree *car_tree, const GmIso4 *car_world_transform,
+	const GmBoxAligned *trigger_box, CPlugSurface *surface, const GmIso4 *iso)
+{
+	CPlugTree trigger_tree;
+	memset(&trigger_tree, 0, sizeof(trigger_tree));
+	trigger_tree.flags = 0x80u;
+	trigger_tree.surface = surface;
+	SPlugTreeLocatedPair pair = { car_tree, car_world_transform, &trigger_tree, iso };
+	(void)CHmsCollisionManager_SZone_ComputeCollisionTree2RootOnly(
+		zone, &pair, trigger_box);
+}
+
+TMNF_HD void TmnfRace_DetectTriggerCollisions(const TmnfRoute *route,
+	CHmsCollisionManager_SZone *zone, CPlugTree *car_tree,
+	const GmIso4 *car_world_transform, uint32_t car_corpus_ref)
+{
+	validate_route(route);
+	uint32_t checkpoints = route->metadata->checkpoint_count;
+	uint32_t count = checkpoints + route->metadata->finish_count;
+	if (count >= TMNF_RACE_TRIGGER_CORPUS_BASE)
+		race_fail("too many trigger corpus references");
+	GmBoxAligned car_box;
+	GmBoxAligned_SetMult(&car_box, &car_tree->box, car_world_transform);
+	zone->current_corpus1 = car_corpus_ref;
+	zone->current_material = 0;
+	if (route->trigger_geometry != NULL) {
+		const TmnfTrack *geometry = route->trigger_geometry;
+		CHmsCollisionManager_SGroup group;
+		memset(&group, 0, sizeof(group));
+		/* Detection borrows these entries without modifying the mapping. */
+		group.static_entries = (HmsStaticCollisionEntry *)geometry->entries;
+		group.static_entry_count = geometry->entry_count;
+		CHmsCollisionManager_SGroup *previous = zone->static_group;
+		zone->static_group = &group;
+		CHmsCollisionManager_SZone_DetectStaticTreeWithCorpusOffset(
+			zone, car_world_transform, car_tree, TMNF_RACE_TRIGGER_CORPUS_BASE - 1);
+		zone->static_group = previous;
+		return;
+	}
+	/* Box-only routes lack the game's trigger collision tree. Preserve
+	 * registration order for this approximation; exact playback uses the
+	 * mesh sidecar and its spatial traversal above. Synthetic routes may
+	 * omit the loader's precomputed registration order. */
+	for (uint32_t pass = 0; pass < count; ++pass) {
+		uint32_t i = route->trigger_order ? route->trigger_order[pass] : pass;
+		const TmnfRouteTrigger *trigger = i < checkpoints
+			? &route->checkpoints[i] : &route->finish[i - checkpoints];
+		GmBoxAligned box;
+		GmBoxAligned_SetMult(&box, &trigger->box, &trigger->transform);
+		if (!GmBoxAligned_TestInter(&car_box, &box)) continue;
+		zone->current_corpus2 = TMNF_RACE_TRIGGER_CORPUS_BASE + i;
+		TriggerMesh mesh;
+		build_trigger_mesh(&mesh, &trigger->box);
+		detect_trigger_surface(zone, car_tree, car_world_transform,
+			&box, &mesh.surface, &trigger->transform);
+	}
 }
 
 /* --- dense projection ----------------------------------------------------- */
@@ -491,6 +574,7 @@ TMNF_HD void TmnfRace_Reset(
 	if (state == NULL || car_world_transform == NULL)
 		race_fail("reset argument is null");
 	memset(state, 0, sizeof(*state));
+	state->lap_limit = route->metadata->lap_count;
 	state->previous_car_transform = *car_world_transform;
 	state->respawn_location = route->start->spawn;
 	DenseProjection dense = project_full(
@@ -522,70 +606,72 @@ TMNF_HD int TmnfRace_UpdateOffTrack(
 	return state->off_track_ticks == grace_ticks;
 }
 
-TMNF_HD TmnfRaceStepResult TmnfRace_Step(
-	const TmnfRoute *route,
-	TmnfRaceState *state,
-	uint64_t trigger_contacts,
-	const GmIso4 *car_world_transform)
+TMNF_HD void TmnfRace_BeginStep(const TmnfRoute *route,
+	TmnfRaceState *state, TmnfRaceStepResult *result)
 {
 	validate_route(route);
-	if (state == NULL || car_world_transform == NULL)
+	if (state == NULL || result == NULL)
 		race_fail("step argument is null");
 	if (state->finished)
 		race_fail("cannot step a finished race");
+	memset(result, 0, sizeof(*result));
+	if (state->phase == TMNF_RACE_RUNNING) state->elapsed_ticks++;
+	TmnfCheckpointSet_Clear(&state->contacts);
+}
 
-	TmnfRaceStepResult result = {0};
-	const uint32_t checkpoint_count = route->metadata->checkpoint_count;
-	state->elapsed_ticks++;
-
-	/* The game's per-checkpoint flags (0x0047E400 InternalOnCheckpoint)
-	 * make every contact after the first of a lap inert; the contact edge
-	 * against the previous tick's passes is the same rule. */
-	uint64_t entered = trigger_contacts & ~state->trigger_contacts;
-	state->trigger_contacts = trigger_contacts;
-
-	for (uint32_t i = 0; i < checkpoint_count; ++i) {
-		uint64_t bit = (uint64_t)1 << i;
-		if ((entered & bit) == 0)
-			continue;
-		if (state->visited_checkpoints & bit) {
-			result.checkpoint_repeated = 1;
-			continue;
+TMNF_HD int TmnfRace_ProcessContact(const TmnfRoute *route,
+	TmnfRaceState *state, uint32_t trigger_index, TmnfRaceStepResult *result)
+{
+	uint32_t checkpoint_count = route->metadata->checkpoint_count;
+	if (trigger_index >= checkpoint_count + route->metadata->finish_count)
+		race_fail("race contact trigger index is out of range");
+	if (state->finished) return 0;
+	if (trigger_index < checkpoint_count) {
+		uint32_t i = trigger_index;
+		TmnfCheckpointSet_Add(&state->contacts, i);
+		/* 0x0047C330 tests this lap's visited flag on every contact.
+		 * A held contact can count again immediately after a lap resets it. */
+		if (TmnfCheckpointSet_Test(&state->visited, i)) {
+			result->checkpoint_repeated = 1;
+			return route->checkpoints[i].no_respawn != 0;
 		}
-		state->visited_checkpoints |= bit;
+		TmnfCheckpointSet_Add(&state->visited, i);
 		state->visited_count++;
 		state->passed_race_checkpoints++;
-		result.checkpoint_accepted = 1;
-		result.checkpoint_index = i;
+		result->checkpoint_accepted = 1;
+		result->checkpoint_index = i;
 		/* 0x0047C330 OnCheckpoint: a block whose info has +0x120 set keeps
 		 * the previous spawn and does not arm the respawn. */
 		if (route->checkpoints[i].no_respawn == 0) {
 			state->respawn_location = route->checkpoints[i].spawn;
 			state->respawn_available = 1;
 		}
+		return 1;
 	}
 
-	int entered_finish =
-		(entered & (UINT64_MAX << (64 - route->metadata->finish_count))) != 0;
-	int began_new_lap = 0;
-	if (entered_finish && state->visited_count == checkpoint_count) {
+	TmnfCheckpointSet_Add(&state->contacts, TmnfRoute_FinishContactIndex(route->metadata,
+		trigger_index - checkpoint_count));
+	/* 0x00480820 OnFinishLine requires the player's racing phase. Ordinary
+	 * checkpoints have no such gate and survive the blocked countdown. */
+	if (state->phase == TMNF_RACE_COUNTDOWN) return 0;
+	if (state->visited_count == checkpoint_count) {
 		state->passed_race_checkpoints++;
 		state->completed_laps++;
-		result.lap_completed = 1;
-		if (state->completed_laps == route->metadata->lap_count) {
+		result->lap_completed = 1;
+		if (state->completed_laps == state->lap_limit) {
 			if (state->passed_race_checkpoints !=
-				route->metadata->total_race_checkpoints) {
+				(checkpoint_count + 1) * state->lap_limit) {
 				race_fail("finished with the wrong checkpoint total");
 			}
 			state->finished = 1;
 			state->finish_time_ms =
 				state->elapsed_ticks * TMNF_RACE_TICK_MS;
-			result.finished = 1;
-			result.race_time_ms = state->finish_time_ms;
+			result->finished = 1;
+			result->race_time_ms = state->finish_time_ms;
 		} else {
 			const TmnfRouteReferencePoint *origin =
 				TmnfRoute_GetReferencePoints(route);
-			state->visited_checkpoints = 0;
+			TmnfCheckpointSet_Clear(&state->visited);
 			state->visited_count = 0;
 			/* 0x00480820 OnFinishLine -> 0x0047E400 InternalOnCheckpoint
 			 * with a null spawn: +0x274 = +0x244, the start spawn. */
@@ -598,10 +684,17 @@ TMNF_HD TmnfRaceStepResult TmnfRace_Step(
 			state->corridor_lateral = 0.0f;
 			state->corridor_vertical = 0.0f;
 			state->outside_corridor = 0;
-			began_new_lap = 1;
 		}
+		return 1;
 	}
+	return 0;
+}
 
+TMNF_HD TmnfRaceStepResult TmnfRace_EndStep(const TmnfRoute *route,
+	TmnfRaceState *state, const GmIso4 *car_world_transform,
+	TmnfRaceStepResult result)
+{
+	int began_new_lap = result.lap_completed && !state->finished;
 	if (state->finished) {
 		uint32_t point_count =
 			TmnfRoute_GetReferencePointCount(route);
@@ -642,6 +735,26 @@ TMNF_HD TmnfRaceStepResult TmnfRace_Step(
 		state->best_progress = state->unwrapped_progress;
 	state->previous_car_transform = *car_world_transform;
 	return result;
+}
+
+/* Mask-only callers have no within-tick collision order. Keep this helper
+ * for synthetic race rules; real physics dispatches sorted contact records. */
+TMNF_HD TmnfRaceStepResult TmnfRace_Step(const TmnfRoute *route,
+	TmnfRaceState *state, uint64_t trigger_contacts,
+	const GmIso4 *car_world_transform)
+{
+	TmnfRaceStepResult result;
+	if (!TmnfRoute_ContactMaskSupported(route->metadata))
+		race_fail("contact mask cannot represent this route; use individual trigger callbacks");
+	TmnfRace_BeginStep(route, state, &result);
+	uint32_t checkpoints = route->metadata->checkpoint_count;
+	for (uint32_t i = 0; i < checkpoints; ++i)
+		if (trigger_contacts & (UINT64_C(1) << i))
+			(void)TmnfRace_ProcessContact(route, state, i, &result);
+	for (uint32_t i = 0; i < route->metadata->finish_count; ++i)
+		if (trigger_contacts & TmnfRoute_FinishContactBit(route->metadata, i))
+			(void)TmnfRace_ProcessContact(route, state, checkpoints + i, &result);
+	return TmnfRace_EndStep(route, state, car_world_transform, result);
 }
 
 TMNF_HD const GmIso4 *TmnfRace_RespawnLocation(const TmnfRaceState *state)

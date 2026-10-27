@@ -91,7 +91,7 @@ enum {
 	VEHICLE_COLLISION_MAX_NODES = 8,
 };
 
-_Static_assert(VEHICLE_COLLISION_MAX_NODES <= TMNF_WORLD_CONTACT_BUFFER_COUNT,
+_Static_assert((uint32_t)VEHICLE_COLLISION_MAX_NODES <= TMNF_WORLD_CONTACT_BUFFER_COUNT,
 	"one contact buffer per vehicle collision node");
 
 #pragma pack(push, 1)
@@ -903,7 +903,9 @@ static void decode_aux(TmnfWorld *world)
 	world->aux.roulette_value = raw_f32(car, 0x608);
 	world->aux.air_control_tick = raw_u32(car, 0x614);
 	memcpy(&world->aux.air_control_speed, car + 0x618, sizeof(GmVec3));
-	world->aux.roulette_modulus = UINT32_MAX;
+	/* TmForever.exe DAT_00D06A74: s_TurboRoulettePeriodMs = 1000.
+	 * This clock controls the causal roulette multiplier on material 30. */
+	world->aux.roulette_modulus = 1000;
 	memcpy(&world->aux.body_box, car + 0x1dc, sizeof(GmBoxAligned));
 	/* car+0x26c is a process-local audio object, not vehicle state. The
 	 * headless native world has no audio source attached. */
@@ -1821,6 +1823,9 @@ TMNF_HD static void link_physics(
 		resolve_response_material;
 	world->physics.response_zone.resolver_user = world;
 	world->physics.route = sources->route;
+	/* Race state belongs to the collection/vector owner, not the copied
+	 * world arena. The owner binds it before a race physics step. */
+	world->physics.race_state = NULL;
 }
 
 TMNF_HD void World_LinkPointers(
@@ -1940,9 +1945,10 @@ static SHmsPhysicalCollision *allocate_records(uint32_t capacity)
 
 int World_HasLocalAssets(void) { return TMNF_HAS_GAME_MASK; }
 
-TmnfWorld *World_Create(
+static TmnfWorld *create_world(
 	const TmnfTrack *track,
-	const char *vehicle_snapshot_path)
+	const char *vehicle_snapshot_path, const GmIso4 *spawn,
+	const TmnfRoute *route, TmnfRaceState *race)
 {
 	if (!TMNF_HAS_GAME_MASK)
 		world_fail("local game mask missing; see docs/LOCAL_ASSETS.md and rebuild with TMNF_GAME_MASK");
@@ -2043,7 +2049,143 @@ TmnfWorld *World_Create(
 	 */
 	world->dyna_params.forceFieldScale =
 		world->cold->compute_tuning.grounded_force_field_scale;
+	if (spawn != NULL)
+		World_Respawn(world, spawn);
+	world->physics.route = route;
+	world->physics.race_state = race;
+	TmnfCheckpointSet_Clear(&world->physics.race_visited);
+	if (race) world->physics.race_visited = race->visited;
 	finish_snapshot_tick(world);
+	return world;
+}
+
+TmnfWorld *World_Create(const TmnfTrack *track, const char *vehicle_snapshot_path)
+{
+	return create_world(track, vehicle_snapshot_path, NULL, NULL, NULL);
+}
+
+TmnfWorld *World_CreateAtSpawn(const TmnfTrack *track,
+	const char *vehicle_snapshot_path, const GmIso4 *spawn)
+{
+	if (spawn == NULL) world_fail("initial spawn is null");
+	return create_world(track, vehicle_snapshot_path, spawn, NULL, NULL);
+}
+
+static GmIso4 seeded_spawn(const GmIso4 *spawn, uint32_t validation_seed)
+{
+	if (spawn == NULL) world_fail("initial spawn is null");
+	GmIso4 seeded = *spawn;
+	if (validation_seed != 0) {
+		/* 0x0047BF00 RespawnPlayerVehicle: x87 PC=24 rounds every
+		 * operation, including normalization before narrowing degrees. */
+		float fraction = x87_div((float)(validation_seed % 100000u), 100000.0f);
+		float degrees = x87_mul(x87_sub(fraction, 0.5f), 0.1f);
+		float radians = x87_div(x87_mul(degrees, 3.1415927410125732f), 180.0f);
+		float sine = x87_sin(radians), cosine = x87_cos(radians);
+		GmMat3 yaw = { { cosine, 0, sine, 0, 1, 0, -sine, 0, cosine } };
+		GmMat3_SetMult((GmMat3 *)&seeded, &yaw, (const GmMat3 *)spawn);
+	}
+	return seeded;
+}
+
+TmnfWorld *World_CreateAtSpawnSeed(const TmnfTrack *track,
+	const char *vehicle_snapshot_path, const GmIso4 *spawn, uint32_t validation_seed)
+{
+	GmIso4 seeded = seeded_spawn(spawn, validation_seed);
+	return create_world(track, vehicle_snapshot_path, &seeded, NULL, NULL);
+}
+
+static void set_countdown_collision_boxes(TmnfWorld *world)
+{
+	/* Loading computes bounds at the wheels' source locations. WheelReset
+	 * subsequently moves their surfaces down by the suspension rest length,
+	 * but the blocked force path does not recompute those bounds. Live
+	 * integration updates them again. Using the live boxes during countdown
+	 * admits contacts the game rejects (recorded on maps 6tfUt2 and e8lHLI). */
+	for (uint32_t i = 0; i < 4; ++i) {
+		GmVec3 *center = &world->wheel_trees[i].box.center;
+		memcpy(center, world->aux_wheels[i].surface_source.t, sizeof(*center));
+	}
+	CPlugTree *root = &world->cold->root_tree;
+	if (root->child_count == 0) world_fail("countdown collision tree is empty");
+	float low[3], high[3];
+	for (uint32_t i = 0; i < root->child_count; ++i) {
+		const GmBoxAligned *box = &root->children[i]->box;
+		for (uint32_t axis = 0; axis < 3; ++axis) {
+			float lo = x87_sub((&box->center.x)[axis], (&box->half_extent.x)[axis]);
+			float hi = x87_add((&box->center.x)[axis], (&box->half_extent.x)[axis]);
+			if (i == 0 || lo < low[axis]) low[axis] = lo;
+			if (i == 0 || hi > high[axis]) high[axis] = hi;
+		}
+	}
+	for (uint32_t axis = 0; axis < 3; ++axis) {
+		(&root->box.center.x)[axis] = x87_mul(x87_add(low[axis], high[axis]), 0.5f);
+		(&root->box.half_extent.x)[axis] = x87_mul(x87_sub(high[axis], low[axis]), 0.5f);
+	}
+}
+
+TmnfWorld *World_CreateAfterCountdownSeed(const TmnfTrack *track,
+	const char *vehicle_snapshot_path, const GmIso4 *spawn,
+	uint32_t validation_seed, uint32_t countdown_ticks)
+{
+	return World_CreateAfterCountdownSeedWithRoute(track, vehicle_snapshot_path,
+		spawn, validation_seed, countdown_ticks, NULL);
+}
+
+TmnfWorld *World_CreateAfterCountdownSeedWithRoute(const TmnfTrack *track,
+	const char *vehicle_snapshot_path, const GmIso4 *spawn,
+	uint32_t validation_seed, uint32_t countdown_ticks, const TmnfRoute *route)
+{
+	return World_CreateRaceAfterCountdownSeed(track, vehicle_snapshot_path,
+		spawn, validation_seed, countdown_ticks, route, NULL, 0, NULL);
+}
+
+TmnfWorld *World_CreateRaceAfterCountdownSeed(const TmnfTrack *track,
+	const char *vehicle_snapshot_path, const GmIso4 *spawn,
+	uint32_t validation_seed, uint32_t countdown_ticks, const TmnfRoute *route,
+	TmnfRaceState *race, uint32_t lap_limit, uint32_t *prestart_checkpoints)
+{
+	GmIso4 seeded = seeded_spawn(spawn, validation_seed);
+	TmnfWorld *world = create_world(track, vehicle_snapshot_path, &seeded, route, NULL);
+	World_Respawn(world, &seeded);
+	if (race) {
+		TmnfRace_Reset(route, race, &seeded);
+		if (lap_limit) race->lap_limit = lap_limit;
+		race->phase = TMNF_RACE_COUNTDOWN;
+		world->physics.race_state = race;
+		TmnfCheckpointSet_Clear(&world->physics.race_visited);
+	}
+	set_countdown_collision_boxes(world);
+	CSceneVehicleCarAuxContext *aux = world->physics_corpus.vehicle_compute->aux;
+	aux->integration_flags |= 0x10u; /* VehicleBlockSpeedSet(1), 0x007BC7E0 */
+	for (uint32_t tick = 0; tick < countdown_ticks; ++tick) {
+		World_AdvanceTimer(world, 10);
+		CHmsZoneDynamic_PhysicsStep2(&world->physics, 10);
+	}
+	/* Countdown contacts can oscillate rather than converge. Keep their
+	 * exact final pose, then initialize the live vehicle afresh. Advancing
+	 * the live clock during settling would also consume timed effects. */
+	GmIso4 settled;
+	memcpy(&settled, &world->live_state.rot, sizeof(settled));
+	uint32_t contact_count = world->contact.body_contact_count;
+	GmVec3 contact_normal = world->contact.body_contact_normal_sum;
+	GmVec3 contact_position = world->contact.body_contact_position_sum;
+	if (prestart_checkpoints)
+		*prestart_checkpoints = race ? race->passed_race_checkpoints : 0;
+	World_Destroy(world);
+	if (race) race->phase = TMNF_RACE_START_TICK;
+	world = create_world(track, vehicle_snapshot_path, &settled, route, race);
+	if (race) {
+		TmnfRace_EndStep(route, race, world->physics.corpora[0].collision_corpus->live_iso,
+			world->physics.race_step_result);
+		race->phase = TMNF_RACE_RUNNING;
+	}
+	/* The first sync update can still describe the last countdown contact.
+	 * These summaries do not feed live physics: PhysicsStep2 clears them
+	 * before the first force pass. Retain them for legacy feature history. */
+	world->contact.body_contact_count = contact_count;
+	world->contact.body_contact_normal_sum = contact_normal;
+	world->contact.body_contact_position_sum = contact_position;
 	return world;
 }
 
@@ -2075,6 +2217,12 @@ TMNF_HD CSceneVehicleCar *World_GetPlayerVehicle(TmnfWorld *world)
 TMNF_HD const CHmsStateDyna *World_GetPlayerState(const TmnfWorld *world)
 {
 	return &world->live_state;
+}
+
+TMNF_HD uint32_t World_GetPlayerBodyContactNormal(const TmnfWorld *world, GmVec3 *normal)
+{
+	*normal = world->contact.body_contact_normal_sum;
+	return world->contact.body_contact_count;
 }
 
 TMNF_HD const CFastBuffer_SHmsPhysicalCollision *World_GetLastCollisions(
@@ -2202,6 +2350,16 @@ TMNF_HD void World_WritePlayerGameState(
 	memcpy(car + 0x2e0, &world->compute_state.local_speed_limit, 4);
 	memcpy(car + 0x2e4, &vehicle->engine_mode, 4);
 	memcpy(car + 0x2e8, &vehicle->wheel_count, 4);
+	/* CSceneVehicleCar::UpdateSync (0x007C0670) reads the live body's local
+	 * speed after integration, whereas current_local_speed is from the force
+	 * computation earlier in the tick. Preserve the exact vector arithmetic.
+	 * Only the exported state needs this work; physics never reads it. */
+	GmVec3 sync_speed;
+	CHmsItem_GetLinearSpeed((CHmsItem *)vehicle->hms_item, &sync_speed);
+	memcpy(car + 0x3a0, &sync_speed.z, 4);
+	memcpy(car + 0x3a4, &sync_speed.x, 4);
+	uint32_t sync_turbo = world->aux.turbo_type != TMNF_TURBO_NONE;
+	memcpy(car + 0x3b4, &sync_turbo, 4);
 	memcpy(car + 0x59c, &vehicle->engine, sizeof(vehicle->engine));
 	memcpy(car + 0x5d0, &world->aux.turbo_epoch_tick, 4);
 	memcpy(car + 0x5d4, &world->aux.air_control_immediate, 4);

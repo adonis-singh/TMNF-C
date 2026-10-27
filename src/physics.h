@@ -16,6 +16,7 @@
 #include "collision_response.h"
 #include "hms_dyna.h"
 #include "route.h"
+#include "race.h"
 #include "vehicle.h"
 #include "vehicle_compute.h"
 
@@ -74,12 +75,19 @@ typedef struct TmnfPhysicsWorld {
 	 * finish corpora, static-tree members whose contact sink (0x0047CBA0
 	 * CTrackManiaRaceTriggerAbsorbContact::AbsorbContact) fires from
 	 * ComputeCollisionResponse on the contacts each detection pass found
-	 * against the car's predicted iso. Every detection pass of the player corpus ORs
-	 * TmnfRace_TriggerContactMask into trigger_contacts; PhysicsStep2 clears
-	 * it first. NULL: no triggers (physics-only worlds). A link source
+	 * against the car's predicted iso. Each response records its trigger in
+	 * contacts; trigger_contacts aliases the low word for legacy diagnostics.
+	 * PhysicsStep2 clears the set first. NULL: no triggers (physics-only worlds). A link source
 	 * (TmnfWorldLinkSources.route). */
 	const TmnfRoute *route;
-	uint64_t trigger_contacts;
+	union { uint64_t trigger_contacts; TmnfCheckpointSet contacts; };
+	/* Race layer's accepted flags at tick start; updated during substeps so
+	 * checkpoint callbacks can clear freewheeling at the actual contact. */
+	union { uint64_t race_visited_checkpoints; TmnfCheckpointSet race_visited; };
+	/* Bound by the race/collection owner before stepping. Contact callbacks
+	 * update this state during response, before later physics substeps. */
+	TmnfRaceState *race_state;
+	TmnfRaceStepResult race_step_result;
 } TmnfPhysicsWorld;
 
 /* 0x0055F3B0 */

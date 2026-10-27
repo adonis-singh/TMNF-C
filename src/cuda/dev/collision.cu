@@ -454,7 +454,7 @@ __device__ void tmnf_dev_static_tree_detect(
 	 * replay the original scan directly, preserving every query and contact. */
 	if (sh->overflow) {
 		if (active)
-			static_tree_detect(self, iso, tree);
+		static_tree_detect(self, iso, tree, 0);
 	} else {
 		pool_queries(self, ws, sh, mask, count);
 	}

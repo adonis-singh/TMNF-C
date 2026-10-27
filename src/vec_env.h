@@ -7,7 +7,9 @@
 #define TMNF_VEC_ENV_H
 
 #include <stddef.h>
+#ifndef __cplusplus
 #include <stdatomic.h>
+#endif
 #include <stdint.h>
 
 #include "physics.h"
@@ -30,8 +32,8 @@ enum {
 	TMNF_OBSERVATION_VERSION = 2,
 	TMNF_POLICY_OBSERVATION_WIDTH = 81,
 	TMNF_POLICY_TRANSITION_WIDTH = 5,
-	/* 6: TmnfRaceState carries the respawn location and its armed flag. */
-	TMNF_ENV_SNAPSHOT_VERSION = 6,
+	/* 7: pointer-free checkpoint/contact sets support larger routes. */
+	TMNF_ENV_SNAPSHOT_VERSION = 7,
 	/* contact_body_refs value for a wheel without a contact body. */
 	TMNF_ENV_NO_CONTACT_BODY = 0xFFFFFFFFu,
 };
@@ -205,6 +207,10 @@ typedef struct {
 	 * TMNF_DISCRETE_RESPAWN_FLAG bit and TmnfAnalogAction.respawn. Zero keeps
 	 * the twelve-action and steer/gas/brake sets unchanged. */
 	uint32_t respawn_action;
+	/* Accept the supplied world's initialized pose, including seeded or
+	 * countdown-settled replay starts. Zero requires the route start pose.
+	 * Reset keeps the world snapshot; checkpoint respawn poses stay authored. */
+	uint32_t use_world_spawn;
 } TmnfVecEnvConfig;
 
 typedef struct {
@@ -332,7 +338,7 @@ void TmnfVecEnv_StepAnalogWithGates(TmnfVecEnv *env,
  * so this query intentionally differs from that ending step's observation. */
 void TmnfVecEnv_ObserveGates(TmnfVecEnv *env, TmnfGateObservations *gates);
 
-/* Snapshot version 6 captures/restores every mutable field represented by the
+/* Snapshot version 7 captures/restores every mutable field represented by the
  * current native car/dynamics port (including the per-tick CHmsDynaParams
  * fields) plus race progression (with the corridor and respawn state), reward,
  * episode, and autoreset state.

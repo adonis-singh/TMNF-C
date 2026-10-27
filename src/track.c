@@ -1142,8 +1142,8 @@ static void build_static_response_bodies(TmnfTrack *track) {
 	}
 }
 
-TmnfTrack *TmnfTrack_Load(
-	const char *path, const uint8_t expected_track_sha256[32]) {
+TmnfTrack *TmnfTrack_LoadWithGrid(const char *path,
+	const uint8_t expected_track_sha256[32], int build_grid) {
 	int fd = open(path, O_RDONLY);
 	if (fd < 0) {
 		fail("cannot open snapshot");
@@ -1228,13 +1228,18 @@ TmnfTrack *TmnfTrack_Load(
 		}
 	}
 	derive_water(track, base, header);
-	build_static_grid(track);
+	if (build_grid) build_static_grid(track);
 	build_static_response_bodies(track);
 
 	if (mprotect(base, size, PROT_READ) != 0) {
 		fail("mprotect failed");
 	}
 	return track;
+}
+
+TmnfTrack *TmnfTrack_Load(const char *path,
+	const uint8_t expected_track_sha256[32]) {
+	return TmnfTrack_LoadWithGrid(path, expected_track_sha256, 1);
 }
 
 void TmnfTrack_BindStaticGroup(

@@ -31,12 +31,52 @@ TMNF_HD static void reset_collision_buffer(TmnfPhysicsWorld *world) {
 	world->collision_buffer.collisions.count = 0;
 }
 
+typedef struct {
+	TmnfPhysicsWorld *world;
+	TmnfPhysicsCorpus *corpus;
+} TriggerResponseContext;
+
+TMNF_HD static int respond_to_trigger(void *user, const SHmsPhysicalCollision *collision)
+{
+	if (collision->corpus2 < TMNF_RACE_TRIGGER_CORPUS_BASE) return 0;
+	TriggerResponseContext *context = (TriggerResponseContext *)user;
+	TmnfPhysicsWorld *world = context->world;
+	uint32_t index = collision->corpus2 - TMNF_RACE_TRIGGER_CORPUS_BASE;
+	uint32_t count = world->route->metadata->checkpoint_count;
+	uint32_t contact_index = index < count ? index
+		: TmnfRoute_FinishContactIndex(world->route->metadata, index - count);
+	TmnfCheckpointSet_Add(&world->contacts, contact_index);
+	int clear;
+	if (world->race_state != NULL) {
+		clear = TmnfRace_ProcessContact(world->route, world->race_state,
+			index, &world->race_step_result);
+		world->race_visited = world->race_state->visited;
+	} else if (index < count) {
+		/* Physics-only callers still need checkpoint freewheel callbacks. */
+		clear = !TmnfCheckpointSet_Test(&world->race_visited, index) ||
+			world->route->checkpoints[index].no_respawn;
+		TmnfCheckpointSet_Add(&world->race_visited, index);
+	} else {
+		clear = TmnfCheckpointSet_All(&world->race_visited, count);
+	}
+	if (clear) context->corpus->vehicle->flag_60c = 0;
+	return 1;
+}
+
 /* active = 0 is a lane keeping the warp company (tmnf_warp.h): it takes part
  * in the cooperative detection with no work of its own and touches nothing. */
 TMNF_HD static void detect_and_respond(
 	TmnfPhysicsWorld *world, TmnfPhysicsCorpus *corpus, int active) {
 	if (active) {
 		reset_collision_buffer(world);
+		/* The trigger device precedes the static track device in the game.
+		 * Detecting it here also preserves per-sphere buffer activation order. */
+		if (world->route != NULL && corpus->vehicle != NULL) {
+			world->collision_zone->general_buffer = &world->collision_buffer;
+			TmnfRace_DetectTriggerCollisions(world->route, world->collision_zone,
+				corpus->collision_corpus->tree, corpus->collision_corpus->live_iso,
+				corpus->collision_corpus->object_ref);
+		}
 	}
 	CHmsCollisionManager_SZone_DetectCollisionsCorpus(
 		world->collision_zone, &world->collision_buffer,
@@ -44,19 +84,12 @@ TMNF_HD static void detect_and_respond(
 	if (!active) {
 		return;
 	}
-	/* The waypoint corpora are static-tree entries of the game's zone, so
-	 * this pass detected the car against them with the same predicted iso
-	 * (corpus_iso: live_iso of a dynamic corpus), and ComputeCollisionResponse
-	 * below is where their contact sink raises OnCheckpoint/OnFinishLine. The port's zone has no
-	 * trigger corpora; the route's volumes are tested here instead. */
-	if (world->route != NULL && corpus->vehicle != NULL) {
-		world->trigger_contacts |= TmnfRace_TriggerContactMask(
-			world->route, corpus->collision_corpus->tree,
-			corpus->collision_corpus->live_iso);
-	}
 	world->response_zone.collisions =
 		&world->collision_buffer.collisions;
-	CHmsZoneDynamic_ComputeCollisionResponse(&world->response_zone);
+	TriggerResponseContext context = { world, corpus };
+	CHmsZoneDynamic_ComputeCollisionResponseWithContacts(&world->response_zone,
+		world->route != NULL && corpus->vehicle != NULL ? respond_to_trigger : NULL,
+		&context);
 }
 
 /* 0x0055F3B0. The position argument is intentionally unused: a uniform field
@@ -185,11 +218,24 @@ TMNF_HD static void step_dynamic_corpus(
 /* 0x00549C90 */
 TMNF_HD void CHmsZoneDynamic_PhysicsStep2(TmnfPhysicsWorld *world, uint32_t tick_ms) {
 	float dt = x87_mul((float)(int32_t)tick_ms, 0.001f);
-	world->trigger_contacts = 0;
+	TmnfCheckpointSet_Clear(&world->contacts);
+	if (world->race_state != NULL) {
+		if (tick_ms != TMNF_RACE_TICK_MS) tmnf_fail("race step must be 10 ms");
+		TmnfRace_BeginStep(world->route, world->race_state, &world->race_step_result);
+	}
 
 	/* Initial force/integration pass over the zone's dynamic corpora. */
 	for (uint32_t i = 0; i < world->corpus_count; ++i) {
 		TmnfPhysicsCorpus *corpus = &world->corpora[i];
+		/* UpdateSync clears these after the previous completed tick. Keep
+		 * their full-tick scope in the headless port, including early
+		 * adaptive substeps that ComputeForces revisits below. */
+		if (corpus->vehicle_compute != NULL) {
+			TMNFVehicleContactContext *contact = corpus->vehicle_compute->contact;
+			contact->body_contact_count = 0;
+			contact->body_contact_position_sum = (GmVec3){ 0.0f, 0.0f, 0.0f };
+			contact->body_contact_normal_sum = (GmVec3){ 0.0f, 0.0f, 0.0f };
+		}
 		if ((corpus->scene_flags & 0x0001E000u) == 0) {
 			CHmsZoneDynamic_ComputeCorpusForces(world, corpus, dt);
 			CHmsDyna_DoPreCollisionDynamic(corpus->dyna, dt);

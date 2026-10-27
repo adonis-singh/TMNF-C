@@ -64,12 +64,10 @@ def fail(message: str) -> None:
 # --- extraction (gbxtools generate_input_file.py logic) ---------------------
 
 def _event_time(event) -> int:
-    if event.event_name == "Respawn":
-        t = int(event.time / 10) * 10
-        if event.time % 10 == 0:
-            t -= 10
-        return t
-    return int(event.time / 10) * 10 - 10
+    # Event timestamps need not be tick-aligned, especially in early
+    # analog replays. Apply at the first boundary at/after the timestamp;
+    # schedules label the beginning of that 10 ms step.
+    return ((int(event.time) + 9) // 10) * 10 - 10
 
 
 def _find_event_end(entries, target, from_index):
@@ -82,7 +80,10 @@ def _find_event_end(entries, target, from_index):
 def _should_skip(event) -> bool:
     if event.event_name in ("AccelerateReal", "BrakeReal"):
         return event.flags != 1
-    if event.event_name == "Steer":
+    # Analog controls encode their value across flags/enabled; zero in the
+    # enabled half is a valid Gas value (for example the replay's initial
+    # full-throttle event), not an inactive button state.
+    if event.event_name in ("Steer", "Gas"):
         return False
     if event.event_name.startswith("_Fake"):
         return True

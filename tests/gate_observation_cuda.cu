@@ -45,6 +45,7 @@ int main(void) {
 		scene.metadata.checkpoint_count = i % 64;
 		scene.metadata.finish_count = 1 + (i / 64) % (64 - scene.metadata.checkpoint_count); scene.metadata.lap_count = 3;
 		scene.state.completed_laps = i % 3; scene.state.finished = (i % 31 == 0);
+		scene.state.lap_limit = scene.metadata.lap_count;
 		scene.state.visited_checkpoints = ((uint64_t)next() << 32) | next();
 		scene.car = pose();
 		for (int j = 0; j < 64; ++j) {

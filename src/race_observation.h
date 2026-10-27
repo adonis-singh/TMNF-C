@@ -74,10 +74,9 @@ TMNF_HD static inline void TmnfRace_ObserveGates(
 		!car_transform || !out ||
 		route->metadata->checkpoint_count > TMNF_RACE_MAX_CHECKPOINTS ||
 		(route->metadata->checkpoint_count && !route->checkpoints) ||
-		route->metadata->finish_count == 0 ||
-		(uint64_t)route->metadata->finish_count + route->metadata->checkpoint_count > 64 ||
-		route->metadata->lap_count == 0 ||
-		state->completed_laps > route->metadata->lap_count)
+		!TmnfRoute_TriggerCountsSupported(route->metadata) ||
+		state->lap_limit == 0 ||
+		state->completed_laps > state->lap_limit)
 		tmnf_fail("invalid gate observation arguments");
 	memset(out, 0, sizeof(*out));
 	for (uint32_t i = 0; i < TMNF_GATE_SLOTS; ++i)
@@ -85,12 +84,12 @@ TMNF_HD static inline void TmnfRace_ObserveGates(
 	out->finished = state->finished != 0;
 	if (out->finished)
 		return;
-	out->remaining_laps = route->metadata->lap_count - state->completed_laps;
+	out->remaining_laps = state->lap_limit - state->completed_laps;
 	float distances[TMNF_GATE_CHECKPOINT_SLOTS];
 	uint32_t indices[TMNF_GATE_CHECKPOINT_SLOTS];
 	uint32_t selected = 0;
 	for (uint32_t i = 0; i < route->metadata->checkpoint_count; ++i) {
-		if (state->visited_checkpoints & (UINT64_C(1) << i))
+		if (TmnfCheckpointSet_Test(&state->visited, i))
 			continue;
 		out->remaining_checkpoints++;
 		GmVec3 center = tmnf_gate_center(&route->checkpoints[i]);

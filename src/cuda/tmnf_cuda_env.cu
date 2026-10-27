@@ -281,12 +281,14 @@ static DeviceTrack upload_track(const TmnfTrack *track)
 typedef struct {
 	uint8_t *mapping;
 	TmnfRouteBvhNode *bvh;
+	uint32_t *trigger_order;
+	DeviceTrack trigger_geometry;
 	TmnfRoute *route;
 } DeviceRoute;
 
 static DeviceRoute upload_route(const TmnfRoute *route)
 {
-	DeviceRoute result;
+	DeviceRoute result = {};
 	if (route->mapping == NULL || route->projection_bvh == NULL)
 		cuda_fail("route is not a loaded snapshot with a projection BVH");
 	size_t size = route->mapping_size;
@@ -312,6 +314,9 @@ static DeviceRoute upload_route(const TmnfRoute *route)
 	result.bvh = (TmnfRouteBvhNode *)device_upload(
 		route->projection_bvh,
 		(size_t)route->projection_bvh_count * sizeof(TmnfRouteBvhNode));
+	result.trigger_order = (uint32_t *)device_upload(route->trigger_order,
+		((size_t)route->metadata->checkpoint_count + route->metadata->finish_count)
+			* sizeof(uint32_t));
 
 	TmnfRoute shadow = *route;
 	shadow.mapping = result.mapping;
@@ -326,6 +331,11 @@ static DeviceRoute upload_route(const TmnfRoute *route)
 	REBASE_PTR(centerline, const TmnfRouteReferencePoint *);
 #undef REBASE_PTR
 	shadow.projection_bvh = result.bvh;
+	shadow.trigger_order = result.trigger_order;
+	if (route->trigger_geometry != NULL) {
+		result.trigger_geometry = upload_track(route->trigger_geometry);
+		shadow.trigger_geometry = result.trigger_geometry.track;
+	}
 	result.route = (TmnfRoute *)device_upload(&shadow, sizeof(shadow));
 	return result;
 }
@@ -338,6 +348,7 @@ static DeviceRoute upload_route(const TmnfRoute *route)
  * indexed by the thread's environment. */
 typedef struct {
 	uint32_t count;
+	uint32_t replay_mode;
 	size_t world_size;              /* World_Size(): TmnfWorld is opaque */
 	const TmnfWorld *template_world; /* the host world as uploaded */
 	/* The immutable half of the world (World_ColdSize bytes), one copy at
@@ -844,7 +855,8 @@ __device__ static void apply_respawn(
 	if (env->race_states == NULL)
 		env_fail("respawn needs the race layer");
 	const GmIso4 *spawn =
-		TmnfRace_RespawnLocation(&env->race_states[index]);
+		env->replay_mode ? &env->race_states[index].respawn_location
+		: TmnfRace_RespawnLocation(&env->race_states[index]);
 	if (spawn == NULL)
 		env_fail("respawn before any checkpoint restarts the race");
 	TmnfVehicle_Respawn(player_corpus(env, index), spawn);
@@ -852,12 +864,16 @@ __device__ static void apply_respawn(
 
 __device__ static void physics_tick(
 	const DeviceEnv *env, uint32_t index, const TMNFRaceInputs *input,
-	uint32_t tick_ms)
+	uint32_t tick_ms, TmnfRaceState *race)
 {
 	TmnfPhysicsCorpus *corpus = player_corpus(env, index);
 	apply_respawn(env, index, input);
 	CTrackManiaControlPlayerInput_UpdateVehicleStateFromInputs(
 		input, corpus->vehicle);
+	if (race != NULL)
+		World_GetPhysicsWorld(env_world(env, index))->race_visited =
+			race->visited;
+	World_GetPhysicsWorld(env_world(env, index))->race_state = race;
 	advance_timer(corpus, tick_ms);
 	CHmsZoneDynamic_PhysicsStep2(
 		World_GetPhysicsWorld(env_world(env, index)), tick_ms);
@@ -1029,12 +1045,11 @@ __device__ static int step_one_tick(
 			input.respawn = 0;
 		}
 	}
-	physics_tick(env, index, &input, TMNF_RACE_TICK_MS);
+	physics_tick(env, index, &input, TMNF_RACE_TICK_MS, race);
 
-	TmnfRaceStepResult race_result = TmnfRace_Step(
-		env->route, race,
-		World_GetPhysicsWorld(env_world(env, index))->trigger_contacts,
-		corpus->collision_corpus->live_iso);
+	TmnfRaceStepResult race_result = TmnfRace_EndStep(
+		env->route, race, corpus->collision_corpus->live_iso,
+		World_GetPhysicsWorld(env_world(env, index))->race_step_result);
 	TmnfTerminationReason reason = race_result.finished
 		? TMNF_TERMINATION_FINISH
 		: failure_reason(env, index);
@@ -1437,7 +1452,7 @@ __global__ static void tmnf_kernel(DeviceEnv env, KernelArgs args)
 	case KERNEL_STEP_RAW:
 		if (valid) {
 			const TMNFRaceInputs *inputs = (const TMNFRaceInputs *)args.in;
-			physics_tick(&env, index, &inputs[index], args.ticks);
+			physics_tick(&env, index, &inputs[index], args.ticks, NULL);
 			if (args.out != NULL)
 				write_physics_observation(player_corpus(&env, index),
 					&((TmnfObservation *)args.out)[index]);
@@ -1454,20 +1469,22 @@ __global__ static void tmnf_kernel(DeviceEnv env, KernelArgs args)
 		}
 		break;
 	case KERNEL_ADVANCE:
-		/* Second half. With a route the pair also runs the harness's
-		 * race tracker (TmnfRace_Step after the step until the finish),
-		 * which is what arms the respawn location a later input may
-		 * use. */
+		/* Second half. With a route, sorted contact callbacks update the
+		 * race tracker during physics; EndStep updates progress afterward.
+		 * Checkpoint callbacks also arm later respawns. */
 		if (valid) {
 			TmnfPhysicsCorpus *corpus = player_corpus(&env, index);
 			TmnfPhysicsWorld *physics =
 				World_GetPhysicsWorld(env_world(&env, index));
+			physics->race_visited = env.route != NULL
+				? env.race_states[index].visited : TmnfCheckpointSet{};
+			int race_active = env.route != NULL && !env.race_states[index].finished;
+			physics->race_state = race_active ? &env.race_states[index] : NULL;
 			advance_timer(corpus, args.ticks);
 			CHmsZoneDynamic_PhysicsStep2(physics, args.ticks);
-			if (env.route != NULL && !env.race_states[index].finished) {
-				(void)TmnfRace_Step(env.route, &env.race_states[index],
-					physics->trigger_contacts,
-					corpus->collision_corpus->live_iso);
+			if (race_active) {
+				(void)TmnfRace_EndStep(env.route, &env.race_states[index],
+					corpus->collision_corpus->live_iso, physics->race_step_result);
 			}
 		}
 		break;
@@ -1893,7 +1910,7 @@ static void create_into(
 	env->has_route = 1;
 	resolve_race_budget(&device->config, route);
 	device->fell_floor_y = route_floor_y(route) - TMNF_FELL_MARGIN_METERS;
-	validate_spawn(template_world, route);
+	if (!config->use_world_spawn) validate_spawn(template_world, route);
 	env->lookahead_meters = (float *)device_upload(
 		TMNF_OBSERVATION_LOOKAHEAD_METERS,
 		sizeof(float) * TMNF_OBSERVATION_LOOKAHEAD_COUNT);
@@ -1990,7 +2007,8 @@ static void destroy_env(TmnfCudaVecEnv *env, bool best_effort)
 		return;
 	void *blocks[] = {
 		env->track.mapping, env->track.track,
-		env->route.mapping, env->route.bvh, env->route.route,
+		env->route.mapping, env->route.bvh, env->route.trigger_order, env->route.route,
+		env->route.trigger_geometry.mapping, env->route.trigger_geometry.track,
 		env->vehicle_blob, env->curve_bounds, env->fake_contact_mask,
 		env->water_tables, env->lookahead_meters, env->gamma_powers,
 		(void *)env->device.template_world, env->device.cold,
@@ -2014,11 +2032,14 @@ static void destroy_env(TmnfCudaVecEnv *env, bool best_effort)
 			if (!best_effort) check(error, "cudaFree");
 		}
 	}
-	for (uint32_t i = 0; i < env->track.block_count; ++i) {
-		cudaError_t error = cudaFree(env->track.blocks[i]);
-		if (!best_effort) check(error, "cudaFree");
+	DeviceTrack *tracks[] = { &env->track, &env->route.trigger_geometry };
+	for (size_t t = 0; t < sizeof(tracks) / sizeof(tracks[0]); ++t) {
+		for (uint32_t i = 0; i < tracks[t]->block_count; ++i) {
+			cudaError_t error = cudaFree(tracks[t]->blocks[i]);
+			if (!best_effort) check(error, "cudaFree");
+		}
+		free(tracks[t]->blocks);
 	}
-	free(env->track.blocks);
 	free(env);
 }
 
@@ -2343,4 +2364,20 @@ void TmnfCudaVecEnv_CopyWorldToHost(
 	download(env, sources.wheel_history, env->device.wheel_history + (size_t)index * 4,
 		4 * sizeof(CSceneVehicleCarWheelHistory), "wheel history download");
 	World_LinkPointers(destination, &sources);
+}
+
+void TmnfCudaVecEnv_CopyRaceToHost(TmnfCudaVecEnv *env, uint32_t index,
+	TmnfRaceState *destination)
+{
+	require_route(env);
+	if (destination == NULL || index >= env->device.count)
+		cuda_fail("race copy argument is invalid");
+	download(env, destination, env->device.race_states + index,
+		sizeof(*destination), "race state download");
+}
+
+void TmnfCudaVecEnv_SetReplayMode(TmnfCudaVecEnv *env, int enabled)
+{
+	require_route(env);
+	env->device.replay_mode = enabled != 0;
 }

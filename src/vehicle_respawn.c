@@ -210,6 +210,10 @@ TMNF_HD static void vehicle_reset(TmnfPhysicsCorpus *corpus)
 		wheel_reset(vehicle, aux, i);
 	/* 0x007BC9A0 SEngine::Reset */
 	vehicle->engine.reverse = 0;
+	/* Engine +0x28 and Model6 +0x5c4 are the same game word. The
+	 * port keeps both views, so reset the Model6 copy before its next
+	 * reverse-latch update as well. */
+	model6->reverse_mode = 0;
 	vehicle->engine.rpm = 0.0f;
 	vehicle->engine.gear = 1;
 	vehicle->engine.target_rpm = 0.0f;

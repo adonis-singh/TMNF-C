@@ -434,6 +434,11 @@ TMNF_HD static void fill_external_contact_speed(
 /* 0x005497C0  Sorts and dispatches all detected physical collisions.
  * VALIDATED: 2,000 graph-complete A01 records. */
 TMNF_HD void CHmsZoneDynamic_ComputeCollisionResponse(CHmsResponseZone *zone) {
+	CHmsZoneDynamic_ComputeCollisionResponseWithContacts(zone, NULL, NULL);
+}
+
+TMNF_HD void CHmsZoneDynamic_ComputeCollisionResponseWithContacts(
+	CHmsResponseZone *zone, CHmsSpecialContactFn special_contact, void *user) {
 	if (zone == NULL || zone->collisions == NULL) {
 		tmnf_abort();
 	}
@@ -444,6 +449,8 @@ TMNF_HD void CHmsZoneDynamic_ComputeCollisionResponse(CHmsResponseZone *zone) {
 	for (uint32_t i = 0; i < count; i++) {
 		SHmsPhysicalCollision *collision =
 			CFastBuffer_SHmsPhysicalCollision_At(zone->collisions, i);
+		if (special_contact != NULL && special_contact(user, collision))
+			continue;
 		CHmsResponseBody *body1 =
 			resolve_body(zone, collision->corpus1);
 		CHmsResponseBody *body2 =

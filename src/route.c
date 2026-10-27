@@ -263,8 +263,7 @@ static void fix_and_validate(uint8_t *base, TmnfRouteHeader *header) {
 		header->sections[TMNF_ROUTE_START].count != 1 ||
 		header->sections[TMNF_ROUTE_FINISH].count != metadata->finish_count ||
 		metadata->lap_count == 0 ||
-		metadata->finish_count == 0 ||
-		(uint64_t)metadata->finish_count + metadata->checkpoint_count > 64 ||
+		!TmnfRoute_TriggerCountsSupported(metadata) ||
 		metadata->checkpoint_count !=
 			header->sections[TMNF_ROUTE_CHECKPOINTS].count ||
 		metadata->centerline_count !=
@@ -316,15 +315,10 @@ static void fix_and_validate(uint8_t *base, TmnfRouteHeader *header) {
 	for (uint32_t i = 0; i < metadata->finish_count; ++i) {
 		if (finish[i].waypoint_type == TMNF_ROUTE_WAYPOINT_FINISH) {
 			validate_trigger(&finish[i], i, TMNF_ROUTE_WAYPOINT_FINISH);
-			if (start->waypoint_type != TMNF_ROUTE_WAYPOINT_START)
-				fail("dedicated finish has a shared start");
 		} else {
 			validate_trigger(&finish[i], i, TMNF_ROUTE_WAYPOINT_START_FINISH);
-			if (metadata->finish_count != 1 ||
-				start->waypoint_type != TMNF_ROUTE_WAYPOINT_START_FINISH ||
-				start->block_index != finish[i].block_index ||
-				metadata->lap_count <= 1)
-				fail("invalid shared start/finish");
+			/* Extra StartFinish blocks are alternative finishes. Only the
+			 * first authored start supplies the initial spawn location. */
 		}
 	}
 	if (centerline[0].arc_length != 0.0f ||
@@ -427,6 +421,33 @@ static void initialize_projection_bvh(TmnfRoute *route) {
 	}
 }
 
+static int compare_trigger_keys(const void *a, const void *b)
+{
+	uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b;
+	return (x > y) - (x < y);
+}
+
+static void initialize_trigger_order(TmnfRoute *route)
+{
+	uint32_t checkpoints = route->metadata->checkpoint_count;
+	uint64_t count = (uint64_t)checkpoints + route->metadata->finish_count;
+	if (count > UINT32_MAX || count > SIZE_MAX / sizeof(uint64_t))
+		fail("too many route triggers");
+	uint64_t *keys = (uint64_t *)malloc((size_t)count * sizeof(*keys));
+	route->trigger_order = (uint32_t *)malloc((size_t)count * sizeof(uint32_t));
+	if (keys == NULL || route->trigger_order == NULL)
+		fail("trigger order allocation failed");
+	for (uint32_t i = 0; i < count; ++i) {
+		const TmnfRouteTrigger *trigger = i < checkpoints
+			? &route->checkpoints[i] : &route->finish[i - checkpoints];
+		keys[i] = (uint64_t)trigger->block_index << 32 | i;
+	}
+	qsort(keys, (size_t)count, sizeof(*keys), compare_trigger_keys);
+	for (uint32_t i = 0; i < count; ++i)
+		route->trigger_order[i] = (uint32_t)keys[i];
+	free(keys);
+}
+
 TmnfRoute *TmnfRoute_Load(
 	const char *path, const uint8_t expected_track_sha256[32]) {
 	int fd = open(path, O_RDONLY);
@@ -493,6 +514,7 @@ TmnfRoute *TmnfRoute_Load(
 	route->centerline =
 		(const TmnfRouteReferencePoint *)(uintptr_t)route->metadata->reference_rel;
 	initialize_projection_bvh(route);
+	initialize_trigger_order(route);
 	if (mprotect(base, size, PROT_READ) != 0) {
 		fail("mprotect failed");
 	}
@@ -501,6 +523,7 @@ TmnfRoute *TmnfRoute_Load(
 
 void TmnfRoute_Unload(TmnfRoute *route) {
 	free(route->projection_bvh);
+	free(route->trigger_order);
 	if (munmap(route->mapping, route->mapping_size) != 0) {
 		fail("munmap failed");
 	}

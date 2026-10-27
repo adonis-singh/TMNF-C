@@ -13,6 +13,8 @@
 
 #include "collision.h"
 #include "hms_state.h"
+#include "track.h"
+#include "checkpoint_set.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -67,7 +69,7 @@ typedef struct {
 typedef struct {
 	uint32_t lap_count;
 	uint32_t checkpoint_count;
-	uint32_t finish_count;          /* alternatives; checkpoint_count + finish_count <= 64 */
+	uint32_t finish_count;          /* alternatives; single-lap overflow shares one contact bit */
 	uint32_t reference_count;       /* serialized checkpoint_count + 2 */
 	uint32_t total_race_checkpoints;
 	uint32_t race_checkpoint_limit;
@@ -78,6 +80,57 @@ typedef struct {
 	uint64_t finish_rel;
 	uint64_t reference_rel;
 } TmnfRouteMetadata;
+
+/* Checkpoints need individual visited bits. A single-lap race can share one
+ * finish bit when alternatives exceed the remaining set capacity: touching
+ * any eligible finish ends the race, and accepting the last checkpoint
+ * rechecks an already-contacted finish. Multilap alternatives retain distinct
+ * edges, including routes with no checkpoints between laps. */
+TMNF_HD static inline int TmnfRoute_TriggerCountsSupported(const TmnfRouteMetadata *m)
+{
+	return m->checkpoint_count < TMNF_CHECKPOINT_CAPACITY && m->finish_count > 0 &&
+		((uint64_t)m->checkpoint_count + m->finish_count <= TMNF_CHECKPOINT_CAPACITY || m->lap_count == 1);
+}
+
+/* Legacy uint64_t contact helpers cannot represent larger routes. Real physics
+ * dispatches individual trigger indices and uses the full checkpoint set. */
+TMNF_HD static inline int TmnfRoute_ContactMaskSupported(const TmnfRouteMetadata *m)
+{
+	return TmnfRoute_TriggerCountsSupported(m) && m->checkpoint_count < 64 &&
+		((uint64_t)m->checkpoint_count + m->finish_count <= 64 || m->lap_count == 1);
+}
+
+TMNF_HD static inline uint32_t TmnfRoute_ContactCapacity(const TmnfRouteMetadata *m)
+{
+	return TmnfRoute_ContactMaskSupported(m) ? 64 : TMNF_CHECKPOINT_CAPACITY;
+}
+
+TMNF_HD static inline uint32_t TmnfRoute_FinishContactSlots(const TmnfRouteMetadata *m)
+{
+	return (uint64_t)m->checkpoint_count + m->finish_count <= TmnfRoute_ContactCapacity(m)
+		? m->finish_count : 1;
+}
+
+TMNF_HD static inline uint64_t TmnfRoute_FinishContactMask(const TmnfRouteMetadata *m)
+{
+	if (!TmnfRoute_ContactMaskSupported(m)) return 0;
+	uint32_t slots = TmnfRoute_FinishContactSlots(m);
+	return slots ? UINT64_MAX << (64 - slots) : 0;
+}
+
+TMNF_HD static inline uint32_t TmnfRoute_FinishContactIndex(const TmnfRouteMetadata *m,
+	uint32_t finish_index)
+{
+	return TmnfRoute_ContactCapacity(m) - 1 -
+		(TmnfRoute_FinishContactSlots(m) == 1 ? 0 : finish_index);
+}
+
+TMNF_HD static inline uint64_t TmnfRoute_FinishContactBit(const TmnfRouteMetadata *m,
+	uint32_t finish_index)
+{
+	return TmnfRoute_ContactMaskSupported(m)
+		? UINT64_C(1) << TmnfRoute_FinishContactIndex(m, finish_index) : 0;
+}
 
 /* Deterministic, pointer-free prefix of CHmsStateDyna. The two trailing game
  * dwords are excluded because the final one is a process-local pointer. */
@@ -170,6 +223,12 @@ typedef struct {
 	TmnfRouteBvhNode *projection_bvh;
 	uint32_t projection_bvh_count;
 	uint32_t projection_bvh_height;
+	/* Optional exact trigger surfaces, bound to this challenge. Corpus IDs
+	 * are checkpoints first, then finishes. Owned by the collection assets. */
+	const TmnfTrack *trigger_geometry;
+	/* Detection follows authored block order, independently of the race
+	 * checkpoint indices and the dense route's driving order. */
+	uint32_t *trigger_order;
 } TmnfRoute;
 
 TmnfRoute *TmnfRoute_Load(

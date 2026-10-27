@@ -351,11 +351,8 @@ TMNF_HD static void reset_contact_frame(TMNFVehicleComputeContext *context)
 	context->state->event_metric_c = 0.0f;
 	context->contact->side_contact = 0;
 	context->contact->wheel_contact_absorb_count = 0;
-	context->contact->body_contact_count = 0;
-	context->contact->body_contact_position_sum =
-		(GmVec3){ 0.0f, 0.0f, 0.0f };
-	context->contact->body_contact_normal_sum =
-		(GmVec3){ 0.0f, 0.0f, 0.0f };
+	/* Body-contact summaries span all adaptive substeps. The game clears
+	 * them in UpdateSync (0x007C0AF4), once per simulation tick. */
 }
 
 TMNF_HD static void finish_active_frame(

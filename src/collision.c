@@ -131,17 +131,19 @@ TMNF_HD void SHmsSphereBufferContact_MergeAndAddToCollisions(
 					&existing->collision.face_normal)) {
 				break;
 			}
+			/* 0x005381CB: (y*y + x*x) + z*z. A different sum order
+			 * can cross the strict cos(pi/6) merge threshold by one ulp. */
 			float dot = x87_add(
 				x87_add(
 					x87_mul(
-						source->collision.normal.z,
-						existing->collision.normal.z),
+						source->collision.normal.y,
+						existing->collision.normal.y),
 					x87_mul(
 						source->collision.normal.x,
 						existing->collision.normal.x)),
 				x87_mul(
-					source->collision.normal.y,
-					existing->collision.normal.y));
+					source->collision.normal.z,
+					existing->collision.normal.z));
 			if (sphere_merge_threshold() < dot) {
 				break;
 			}
@@ -1087,6 +1089,11 @@ TMNF_HD static int ellipsoid_mesh_face(
 				feature_squared = vertex_squared_l[edge_index];
 			}
 
+			/* The end-vertex branch tests sqrt(d^2), then takes another
+			 * sqrt for the response. Keep the first rounding before the
+			 * radius test: sqrt(nextafterf(1, +inf)) rounds back to 1. */
+			float tested_distance = is_end_vertex
+				? x87_sqrt(feature_squared) : feature_squared;
 			if (is_edge) {
 				if (feature_squared <=
 					edge_closest_squared) {
@@ -1094,16 +1101,13 @@ TMNF_HD static int ellipsoid_mesh_face(
 					break;
 				}
 			} else if (
-				1.0f < feature_squared ||
-				feature_squared <= tiny_squared) {
+				1.0f < tested_distance ||
+				tested_distance <= tiny_squared) {
 				reject_face = 1;
 				break;
 			}
 
-			float feature_distance =
-				x87_sqrt(feature_squared);
-			if (is_end_vertex)
-				feature_distance = x87_sqrt(feature_distance);
+			float feature_distance = x87_sqrt(tested_distance);
 			add_ellipsoid_feature_collision(
 				ellipsoid, face, feature,
 				feature_distance, &face_normal, buffer);
@@ -1200,6 +1204,8 @@ TMNF_HD static int ellipsoid_mesh_face(
 
 		float feature_squared =
 			collision_length_squared(feature);
+		float tested_distance = is_end_vertex
+			? x87_sqrt(feature_squared) : feature_squared;
 		if (is_edge) {
 			if (feature_squared <=
 				edge_closest_squared) {
@@ -1207,16 +1213,13 @@ TMNF_HD static int ellipsoid_mesh_face(
 				break;
 			}
 		} else if (
-			1.0f < feature_squared ||
-			feature_squared <= tiny_squared) {
+			1.0f < tested_distance ||
+			tested_distance <= tiny_squared) {
 			reject_face = 1;
 			break;
 		}
 
-		float feature_distance =
-			x87_sqrt(feature_squared);
-		if (is_end_vertex)
-			feature_distance = x87_sqrt(feature_distance);
+		float feature_distance = x87_sqrt(tested_distance);
 		add_ellipsoid_feature_collision(
 			ellipsoid, face, feature,
 			feature_distance, &face_normal, buffer);
@@ -2003,7 +2006,8 @@ TMNF_HD static void static_grid_scan(
 /* 0x0053A120  Collides a tree against the current static collision tree. */
 /* UNVALIDATED */
 TMNF_HD static void static_tree_detect(
-	CHmsCollisionManager_SZone *self, const GmIso4 *iso, CPlugTree *tree) {
+	CHmsCollisionManager_SZone *self, const GmIso4 *iso, CPlugTree *tree,
+	uint32_t corpus_offset) {
 	if ((tree->flags & 0x80u) == 0) {
 		return;
 	}
@@ -2011,7 +2015,7 @@ TMNF_HD static void static_tree_detect(
 	GmIso4 world;
 	tree_world_iso(&world, tree, iso);
 	for (uint32_t i = 0; i < tree->child_count; i++) {
-		static_tree_detect(self, &world, tree->children[i]);
+		static_tree_detect(self, &world, tree->children[i], corpus_offset);
 	}
 	if (tree->surface == NULL || self->static_group == NULL) {
 		return;
@@ -2020,7 +2024,7 @@ TMNF_HD static void static_tree_detect(
 	GmBoxAligned world_box;
 	GmBoxQuery world_query =
 		GmBoxAligned_SetMultQuery(&world_box, &tree->box, iso);
-	const TmnfStaticGrid *grid = self->static_group->static_grid;
+	const TmnfStaticGrid *grid = corpus_offset ? NULL : self->static_group->static_grid;
 	if (grid != NULL) {
 		uint32_t cell;
 		if (static_grid_locate(grid, &world_box, tree->surface, &cell)) {
@@ -2044,7 +2048,7 @@ TMNF_HD static void static_tree_detect(
 				tree, &world,
 				NULL, &entry->iso, NULL,
 				tree->surface, entry->surface,
-				self->current_corpus1, entry->corpus_ref,
+				self->current_corpus1, entry->corpus_ref + corpus_offset,
 				tree->object_ref, entry->tree_ref);
 		}
 		i++;
@@ -2068,9 +2072,18 @@ TMNF_HD void CHmsCollisionManager_SZone_DetectCollisionBetweenTreeAndStaticColli
 	tmnf_dev_static_tree_detect(self, iso, tree, active);
 #else
 	if (active) {
-		static_tree_detect(self, iso, tree);
+		static_tree_detect(self, iso, tree, 0);
 	}
 #endif
+}
+
+/* The route sidecar stores one-based checkpoint/finish corpus IDs. Detect
+ * its static group with the same traversal, tagging those IDs for race
+ * response dispatch without changing the shared read-only geometry. */
+TMNF_HD void CHmsCollisionManager_SZone_DetectStaticTreeWithCorpusOffset(
+	CHmsCollisionManager_SZone *self, const GmIso4 *iso, CPlugTree *tree,
+	uint32_t corpus_offset) {
+	static_tree_detect(self, iso, tree, corpus_offset);
 }
 
 /* 0x0053A3D0  Collides tree two's root/subtree against tree one's root. */
